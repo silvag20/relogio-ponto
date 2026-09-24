@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relógio de Ponto</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: linear-gradient(135deg, #1e293b, #334155);
+    color: #f1f5f9;
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 30px 15px;
+  }
+  h1 {
+    margin-bottom: 5px;
+    font-size: 1.8rem;
+  }
+  #relogio {
+    font-size: 3rem;
+    font-weight: bold;
+    margin: 20px 0 10px;
+    letter-spacing: 2px;
+  }
+  #data {
+    font-size: 1.1rem;
+    color: #cbd5e1;
+    margin-bottom: 25px;
+  }
+  .botoes {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 30px;
+  }
+  button {
+    padding: 14px 26px;
+    font-size: 1rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: transform 0.15s, opacity 0.15s;
+  }
+  button:active { transform: scale(0.96); }
+  #entrada { background: #22c55e; color: #062b13; }
+  #saida { background: #ef4444; color: #2b0606; }
+  #limpar { background: #64748b; color: #fff; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .container-tabela {
+    width: 100%;
+    max-width: 600px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th, td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    font-size: 0.95rem;
+  }
+  th { color: #93c5fd; }
+  tr:last-child td { border-bottom: none; }
+  .tipo-entrada { color: #4ade80; font-weight: 600; }
+  .tipo-saida { color: #f87171; font-weight: 600; }
+  #vazio {
+    text-align: center;
+    color: #94a3b8;
+    padding: 20px 0;
+  }
+</style>
+</head>
+<body>
+
+  <h1>⏰ Relógio de Ponto</h1>
+  <div id="relogio">--:--:--</div>
+  <div id="data">--</div>
+
+  <div class="botoes">
+    <button id="entrada" onclick="registrarPonto('Entrada')">Registrar Entrada</button>
+    <button id="saida" onclick="registrarPonto('Saída')">Registrar Saída</button>
+    <button id="limpar" onclick="limparRegistros()">Limpar histórico</button>
+  </div>
+
+  <div class="container-tabela">
+    <table>
+      <thead>
+        <tr>
+          <th>Tipo</th>
+          <th>Data</th>
+          <th>Hora</th>
+        </tr>
+      </thead>
+      <tbody id="corpoTabela"></tbody>
+    </table>
+    <div id="vazio">Nenhum registro ainda.</div>
+  </div>
+
+<script>
+  const relogioEl = document.getElementById('relogio');
+  const dataEl = document.getElementById('data');
+  const corpoTabela = document.getElementById('corpoTabela');
+  const vazioEl = document.getElementById('vazio');
+
+  const diasSemana = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
+
+  function atualizarRelogio() {
+    const agora = new Date();
+    relogioEl.textContent = agora.toLocaleTimeString('pt-BR');
+    dataEl.textContent = `${diasSemana[agora.getDay()]}, ${agora.toLocaleDateString('pt-BR')}`;
+  }
+  setInterval(atualizarRelogio, 1000);
+  atualizarRelogio();
+
+  function carregarRegistros() {
+    try {
+      return JSON.parse(localStorage.getItem('registrosPonto')) || [];
+    } catch {
+      return [];
+    }
+  }
+
+  function salvarRegistros(registros) {
+    localStorage.setItem('registrosPonto', JSON.stringify(registros));
+  }
+
+  function renderizarTabela() {
+    const registros = carregarRegistros();
+    corpoTabela.innerHTML = '';
+
+    if (registros.length === 0) {
+      vazioEl.style.display = 'block';
+      return;
+    }
+    vazioEl.style.display = 'none';
+
+    registros.slice().reverse().forEach(reg => {
+      const tr = document.createElement('tr');
+      const classeTipo = reg.tipo === 'Entrada' ? 'tipo-entrada' : 'tipo-saida';
+      tr.innerHTML = `
+        <td class="${classeTipo}">${reg.tipo}</td>
+        <td>${reg.data}</td>
+        <td>${reg.hora}</td>
+      `;
+      corpoTabela.appendChild(tr);
+    });
+  }
+
+  function registrarPonto(tipo) {
+    const agora = new Date();
+    const registros = carregarRegistros();
+    registros.push({
+      tipo,
+      data: agora.toLocaleDateString('pt-BR'),
+      hora: agora.toLocaleTimeString('pt-BR')
+    });
+    salvarRegistros(registros);
+    renderizarTabela();
+  }
+
+  function limparRegistros() {
+    if (confirm('Tem certeza que deseja apagar todo o histórico?')) {
+      localStorage.removeItem('registrosPonto');
+      renderizarTabela();
+    }
+  }
+
+  renderizarTabela();
+</script>
+
+</body>
+</html>
