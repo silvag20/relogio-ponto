@@ -627,7 +627,8 @@ function renderEspelho(){
     }
     totalTrab += trabMin; totalPrev += prevMin; totalExtra += extraMin; totalAtraso += atrasoMin;
     if(regsDia.length===0 && prevMin===0) continue;
-    const podeEditar = currentUser.role==='admin' || currentUser.role==='rh';
+    const podeEditar = currentUser.role==='admin';
+    const temRegistro = regsDia.length>0;
     linhas += `<tr>
       <td>${String(d).padStart(2,'0')}/${String(mes+1).padStart(2,'0')} ${isHoliday?'<span class="badge badge-amarelo">Feriado</span>':''}</td>
       <td>${tipos['Entrada']||'-'}</td><td>${tipos['Saída Intervalo']||'-'}</td>
@@ -635,10 +636,13 @@ function renderEspelho(){
       <td>${minParaHora(trabMin)}</td><td>${minParaHora(prevMin)}</td>
       <td style="color:var(--verde)">${extraMin>0?minParaHora(extraMin):'-'}</td>
       <td style="color:var(--vermelho)">${atrasoMin>0?minParaHora(atrasoMin):'-'}</td>
-      ${podeEditar?`<td><button class="icon-btn" onclick="abrirModalEdicaoPonto('${func.id}','${dataISO}')">✏️ Editar</button></td>`:''}
+      ${podeEditar?`<td style="white-space:nowrap">
+        <button class="icon-btn" onclick="abrirModalEdicaoPonto('${func.id}','${dataISO}')">✏️ Editar</button>
+        ${temRegistro?`<button class="icon-btn" style="color:var(--vermelho)" onclick="excluirMarcacoesDia('${func.id}','${dataISO}')">🗑️ Excluir</button>`:''}
+      </td>`:''}
     </tr>`;
   }
-  const podeEditarCab = currentUser.role==='admin' || currentUser.role==='rh';
+  const podeEditarCab = currentUser.role==='admin';
   document.getElementById('espelhoTabela').innerHTML = `
     <div class="grid-cards">
       <div class="stat-card"><div class="num">${minParaHora(totalTrab)}</div><div class="label">Total trabalhado</div></div>
@@ -719,6 +723,20 @@ async function salvarEdicaoPonto(employeeId, dataISO){
     logAudit(`Ajuste manual de ponto de ${func?func.nome:employeeId} em ${dataISO}: ${alteracoes.join('; ')}`);
   }
   fecharModal();
+  renderEspelho();
+}
+
+async function excluirMarcacoesDia(employeeId, dataISO){
+  const func = dbGet('employees').find(e=>e.id===employeeId);
+  const regsDia = dbGet('records').filter(r=>r.employeeId===employeeId && r.date===dataISO);
+  if(regsDia.length===0) return;
+  const [ano,mes,dia] = dataISO.split('-');
+  if(!confirm(`Excluir todas as marcações de ${func?func.nome:''} em ${dia}/${mes}/${ano}? Esta ação não pode ser desfeita.`)) return;
+  const { error } = await sb.from('time_records').delete().in('id', regsDia.map(r=>r.id));
+  if(error){ alert('Erro ao excluir: '+error.message); return; }
+  const idsExcluidos = new Set(regsDia.map(r=>r.id));
+  state.records = state.records.filter(r=>!idsExcluidos.has(r.id));
+  logAudit(`Exclusão de marcações de ponto de ${func?func.nome:employeeId} em ${dataISO} (${regsDia.map(r=>r.tipo).join(', ')})`);
   renderEspelho();
 }
 let espelhoFuncId=null, espelhoMes=null, espelhoAno=null;
