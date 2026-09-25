@@ -165,7 +165,7 @@ function mapSettingsFromDB(row){
 
 /* Carrega todas as tabelas do Supabase para o estado local */
 async function carregarTudo(){
-  const [empRes, recRes, holRes, setRes, corRes, audRes, cloRes] = await Promise.all([
+  const [empRes, recRes, holRes, setRes, corRes, audRes, cloRes, usrRes] = await Promise.all([
     sb.from('employees').select('*').order('nome'),
     sb.from('time_records').select('*'),
     sb.from('holidays').select('*'),
@@ -173,6 +173,7 @@ async function carregarTudo(){
     sb.from('corrections').select('*'),
     sb.from('audit_log').select('*').order('created_at', {ascending:false}),
     sb.from('closures').select('*'),
+    sb.from('profiles').select('*, employees(nome)'),
   ]);
   state.employees = (empRes.data||[]).map(mapEmployeeFromDB);
   state.records = (recRes.data||[]).map(mapRecordFromDB);
@@ -181,6 +182,7 @@ async function carregarTudo(){
   state.corrections = (corRes.data||[]).map(mapCorrectionFromDB);
   state.audit = (audRes.data||[]).map(a=>({data:a.created_at, usuario:a.usuario_nome, acao:a.acao}));
   state.closures = (cloRes.data||[]).map(c=>({employeeId:c.employee_id, ano:c.ano, mes:c.mes, fechadoPor:c.fechado_por, data:c.fechado_em}));
+  state.usuarios = (usrRes.data||[]).map(u=>({id:u.id, nome:u.nome, role:u.role, employeeId:u.employee_id, employeeNome:u.employees?u.employees.nome:null}));
 }
 
 async function logAudit(acao){
@@ -287,7 +289,8 @@ const MENUS = {
   admin:[['dashboard','📊 Dashboard'],['ponto','🕐 Registrar Ponto'],['colaboradores','👥 Colaboradores'],
     ['espelho','📋 Espelho de Ponto'],['horasextras','⏱ Horas Extras'],['bancohoras','🏦 Banco de Horas'],
     ['atrasos','⚠️ Atrasos e Faltas'],['folha','💰 Folha'],['relatorios','📁 Relatórios'],
-    ['feriados','📅 Feriados'],['correcoes','✏️ Correções'],['auditoria','🔍 Auditoria'],['config','⚙️ Configurações']],
+    ['feriados','📅 Feriados'],['correcoes','✏️ Correções'],['usuarios','👤 Usuários e Acessos'],
+    ['auditoria','🔍 Auditoria'],['config','⚙️ Configurações']],
   rh:[['dashboard','📊 Dashboard'],['ponto','🕐 Registrar Ponto'],['colaboradores','👥 Colaboradores'],
     ['espelho','📋 Espelho de Ponto'],['horasextras','⏱ Horas Extras'],['bancohoras','🏦 Banco de Horas'],
     ['atrasos','⚠️ Atrasos e Faltas'],['folha','💰 Folha'],['relatorios','📁 Relatórios'],
@@ -322,7 +325,7 @@ function navegar(view){
     dashboard: renderDashboard, ponto: renderPonto, colaboradores: renderColaboradores,
     espelho: renderEspelho, horasextras: renderHorasExtras, bancohoras: renderBancoHoras,
     atrasos: renderAtrasos, folha: renderFolha, relatorios: renderRelatorios,
-    feriados: renderFeriados, correcoes: renderCorrecoes, auditoria: renderAuditoria, config: renderConfig
+    feriados: renderFeriados, correcoes: renderCorrecoes, auditoria: renderAuditoria, config: renderConfig, usuarios: renderUsuarios
   };
   (renderers[view] || renderDashboard)();
 }
@@ -1041,6 +1044,76 @@ function renderAuditoria(){
       </table>
     </div>
   `;
+}
+
+/* ======================================================================
+   USUÁRIOS E ACESSOS (criar login + senha direto pelo app)
+   ====================================================================== */
+function renderUsuarios(){
+  const usuarios = dbGet('usuarios');
+  const emp = dbGet('employees');
+  document.getElementById('content').innerHTML = `
+    <h1>Usuários e Acessos</h1>
+    <div class="card">
+      <h3 style="margin-top:0">Criar novo usuário</h3>
+      <div class="form-grid">
+        <div><label>Nome de exibição</label><input id="novoUserNome" placeholder="ex: João da Silva"></div>
+        <div><label>Perfil de acesso</label>
+          <select id="novoUserRole" onchange="document.getElementById('blocoFuncVinculado').style.display=(this.value==='admin'?'none':'block')">
+            <option value="funcionario">Funcionário</option>
+            <option value="rh">RH / Gestor</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </div>
+        <div><label>E-mail de login</label><input id="novoUserEmail" type="email" placeholder="usuario@empresa.com"></div>
+        <div><label>Senha provisória</label><input id="novoUserSenha" type="text" placeholder="mínimo 6 caracteres"></div>
+        <div class="full" id="blocoFuncVinculado">
+          <label>Vincular a qual colaborador?</label>
+          <select id="novoUserFunc">
+            <option value="">-- selecione --</option>
+            ${emp.map(e=>`<option value="${e.id}">${e.nome}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-azul" style="margin-top:14px" onclick="criarUsuario()">+ Criar Usuário</button>
+      <div class="aviso" style="margin-top:14px">⚠️ Depois de criar, avise o colaborador da senha provisória. Se o login não funcionar de primeira, veja em <b>Authentication &gt; Providers &gt; Email</b> no Supabase se a opção "Confirm email" está desativada (para não exigir confirmação por e-mail).</div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Usuários cadastrados</h3>
+      <table>
+        <thead><tr><th>Nome</th><th>Perfil</th><th>Colaborador vinculado</th></tr></thead>
+        <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome||'-'}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function criarUsuario(){
+  const nome = val('novoUserNome');
+  const role = val('novoUserRole');
+  const email = val('novoUserEmail');
+  const senha = val('novoUserSenha');
+  const employeeId = val('novoUserFunc') || null;
+
+  if(!nome || !email || !senha){ alert('Preencha nome, e-mail e senha.'); return; }
+  if(senha.length < 6){ alert('A senha precisa ter pelo menos 6 caracteres.'); return; }
+  if(role!=='admin' && !employeeId){ alert('Selecione o colaborador vinculado a este usuário.'); return; }
+
+  // Cliente temporário (não guarda sessão) para criar o login sem derrubar o admin logado
+  const clienteTemp = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth:{ persistSession:false, autoRefreshToken:false } });
+  const { data, error } = await clienteTemp.auth.signUp({ email, password: senha });
+  if(error){ alert('Erro ao criar login: '+error.message); return; }
+  const novoId = data.user ? data.user.id : null;
+  if(!novoId){ alert('Não foi possível criar o login (talvez esse e-mail já exista).'); return; }
+
+  const { error: erroPerfil } = await sb.from('profiles').insert({ id:novoId, nome, role, employee_id: employeeId });
+  if(erroPerfil){ alert('O login foi criado, mas houve erro ao salvar o perfil: '+erroPerfil.message); return; }
+
+  const emp = dbGet('employees').find(e=>e.id===employeeId);
+  state.usuarios.push({id:novoId, nome, role, employeeId, employeeNome: emp?emp.nome:null});
+  logAudit(`Novo usuário criado: ${nome} (${email}) — perfil ${rotuloPerfil(role)}`);
+  alert('Usuário criado com sucesso! Já pode ser usado para login.');
+  renderUsuarios();
 }
 
 function renderConfig(){
