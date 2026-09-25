@@ -19,16 +19,12 @@
     --cinza:#64748b; --borda:#e2e8f0;
   }
   *{box-sizing:border-box;}
-  body{margin:0;font-family:'Segoe UI',Arial,sans-serif;color:var(--texto);background:var(--fundo);position:relative;}
-  body::before{
-    content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
-    background:url('assets/marca-dagua.png') calc(50% + 115px) center no-repeat;
-    background-size:contain;opacity:0.13;
-  }
+  body{margin:0;font-family:'Segoe UI',Arial,sans-serif;color:var(--texto);
+    background:url('assets/marca-dagua-leve.png') calc(50% + 115px) center no-repeat, var(--fundo);
+    background-size:contain;}
   @media(max-width:800px){
-    body::before{background-position:center center;}
+    body{background-position:center center;}
   }
-  #loginScreen,#appScreen{position:relative;z-index:1;}
   button{cursor:pointer;font-family:inherit;}
   input,select{font-family:inherit;padding:8px 10px;border:1px solid var(--borda);border-radius:6px;font-size:0.95rem;width:100%;}
   label{font-size:0.85rem;color:var(--cinza);display:block;margin-bottom:4px;margin-top:10px;}
