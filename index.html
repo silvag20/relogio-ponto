@@ -181,4 +181,901 @@
 </script>
 
 </body>
+</html><!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relógio de Ponto - Gestão de Funcionários</title>
+<style>
+  :root{
+    --azul:#2563eb; --azul-esc:#1e3a8a; --verde:#16a34a; --vermelho:#dc2626;
+    --amarelo:#d97706; --fundo:#f1f5f9; --card:#ffffff; --texto:#1e293b;
+    --cinza:#64748b; --borda:#e2e8f0;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Segoe UI',Arial,sans-serif;background:var(--fundo);color:var(--texto);}
+  button{cursor:pointer;font-family:inherit;}
+  input,select{font-family:inherit;padding:8px 10px;border:1px solid var(--borda);border-radius:6px;font-size:0.95rem;width:100%;}
+  label{font-size:0.85rem;color:var(--cinza);display:block;margin-bottom:4px;margin-top:10px;}
+  .btn{padding:10px 18px;border:none;border-radius:6px;font-weight:600;font-size:0.95rem;}
+  .btn-azul{background:var(--azul);color:#fff;}
+  .btn-verde{background:var(--verde);color:#fff;}
+  .btn-vermelho{background:var(--vermelho);color:#fff;}
+  .btn-cinza{background:#e2e8f0;color:var(--texto);}
+  .card{background:var(--card);border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:20px;}
+  table{width:100%;border-collapse:collapse;font-size:0.9rem;}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--borda);}
+  th{color:var(--cinza);font-weight:600;background:#f8fafc;}
+  tr:hover td{background:#f8fafc;}
+  .badge{padding:3px 10px;border-radius:20px;font-size:0.78rem;font-weight:600;}
+  .badge-verde{background:#dcfce7;color:#166534;}
+  .badge-vermelho{background:#fee2e2;color:#991b1b;}
+  .badge-amarelo{background:#fef3c7;color:#92400e;}
+  .badge-cinza{background:#e2e8f0;color:#475569;}
+
+  #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a8a,#2563eb);}
+  .login-box{background:#fff;padding:40px;border-radius:14px;width:340px;max-width:90vw;box-shadow:0 10px 40px rgba(0,0,0,0.25);}
+  .login-box h1{font-size:1.4rem;text-align:center;margin-bottom:5px;}
+  .login-box p{text-align:center;color:var(--cinza);font-size:0.85rem;margin-bottom:20px;}
+  .login-box button{width:100%;margin-top:18px;padding:12px;}
+  .login-hint{margin-top:16px;font-size:0.78rem;color:var(--cinza);text-align:center;line-height:1.5;}
+  .erro{color:var(--vermelho);font-size:0.85rem;margin-top:8px;text-align:center;}
+
+  #appScreen{display:none;min-height:100vh;}
+  .layout{display:flex;min-height:100vh;}
+  .sidebar{width:230px;background:var(--azul-esc);color:#fff;padding:20px 0;flex-shrink:0;}
+  .sidebar h2{font-size:1.05rem;padding:0 20px 15px;border-bottom:1px solid rgba(255,255,255,0.15);margin:0 0 10px;}
+  .sidebar .user{padding:0 20px 15px;font-size:0.8rem;color:#c7d2fe;border-bottom:1px solid rgba(255,255,255,0.15);margin-bottom:10px;}
+  .nav-item{display:block;padding:11px 20px;color:#dbeafe;text-decoration:none;font-size:0.9rem;cursor:pointer;border-left:3px solid transparent;}
+  .nav-item:hover{background:rgba(255,255,255,0.08);}
+  .nav-item.ativo{background:rgba(255,255,255,0.12);border-left-color:#60a5fa;color:#fff;font-weight:600;}
+  .sidebar .sair{margin-top:15px;border-top:1px solid rgba(255,255,255,0.15);padding-top:15px;}
+  main{flex:1;padding:26px;overflow-x:auto;}
+  main h1{font-size:1.5rem;margin:0 0 20px;}
+  .grid-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:22px;}
+  .stat-card{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.08);}
+  .stat-card .num{font-size:1.7rem;font-weight:700;}
+  .stat-card .label{font-size:0.8rem;color:var(--cinza);}
+  .filtros{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;}
+  .filtros > div{min-width:150px;}
+  .toggle-menu{display:none;}
+  .ponto-central{text-align:center;padding:40px 20px;}
+  .ponto-central .hora{font-size:2.6rem;font-weight:700;margin-bottom:5px;}
+  .ponto-central .data{color:var(--cinza);margin-bottom:25px;}
+  .btn-ponto{padding:22px 50px;font-size:1.2rem;border-radius:12px;border:none;color:#fff;font-weight:700;}
+  .linha-status{display:flex;justify-content:center;gap:30px;margin-top:30px;flex-wrap:wrap;}
+  .linha-status div{text-align:center;}
+  .linha-status .val{font-size:1.3rem;font-weight:700;}
+  .linha-status .lbl{font-size:0.78rem;color:var(--cinza);}
+  .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);align-items:center;justify-content:center;z-index:50;}
+  .modal{background:#fff;border-radius:10px;padding:24px;width:480px;max-width:92vw;max-height:88vh;overflow-y:auto;}
+  .modal h2{margin-top:0;}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px;}
+  .form-grid .full{grid-column:1/3;}
+  .modal-acoes{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;}
+  .aviso{background:#fef9c3;border:1px solid #fde047;padding:10px 14px;border-radius:8px;font-size:0.85rem;margin-bottom:16px;}
+  .icon-btn{background:none;border:none;color:var(--azul);font-size:0.85rem;font-weight:600;margin-right:10px;}
+  .icon-btn.del{color:var(--vermelho);}
+
+  @media(max-width:800px){
+    .sidebar{position:fixed;left:-230px;top:0;bottom:0;z-index:40;transition:left 0.2s;}
+    .sidebar.aberta{left:0;}
+    main{padding:16px;}
+    .toggle-menu{display:block;background:var(--azul-esc);color:#fff;border:none;padding:10px 14px;border-radius:6px;margin-bottom:14px;}
+    .form-grid{grid-template-columns:1fr;}
+    .form-grid .full{grid-column:1;}
+  }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-box">
+    <h1>⏰ Relógio de Ponto</h1>
+    <p>Gestão de Funcionários e Jornada</p>
+    <label>Usuário</label>
+    <input id="loginUser" placeholder="ex: admin">
+    <label>Senha</label>
+    <input id="loginPass" type="password" placeholder="••••••••">
+    <button class="btn btn-azul" onclick="fazerLogin()">Entrar</button>
+    <div class="erro" id="loginErro"></div>
+    <div class="login-hint">
+      Usuários de demonstração:<br>
+      <b>admin / admin123</b> (Administrador)<br>
+      <b>rh / rh123</b> (RH/Gestor)<br>
+      <b>joao / 123456</b> (Funcionário)
+    </div>
+  </div>
+</div>
+
+<div id="appScreen">
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <h2>⏰ Ponto & RH</h2>
+      <div class="user" id="userInfo"></div>
+      <div id="navMenu"></div>
+      <div class="sair">
+        <a class="nav-item" onclick="fazerLogout()">🚪 Sair</a>
+      </div>
+    </aside>
+    <main>
+      <button class="toggle-menu" onclick="document.getElementById('sidebar').classList.toggle('aberta')">☰ Menu</button>
+      <div id="content"></div>
+    </main>
+  </div>
+</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modalBox"></div>
+</div>
+
+<script>
+const DB_KEYS = ['users','employees','records','holidays','settings','corrections','audit','closures'];
+
+function dbGet(key){ try{ return JSON.parse(localStorage.getItem('rp_'+key)) || []; }catch(e){ return []; } }
+function dbSet(key,val){ localStorage.setItem('rp_'+key, JSON.stringify(val)); }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+function seedDatabase(){
+  if(localStorage.getItem('rp_seeded')) return;
+  const employees = [
+    {id:'e1', nome:'João da Silva', cpf:'123.456.789-00', matricula:'0001', cargo:'Analista', setor:'Operações',
+     salario:2500, cargaMensal:220, admissao:'2023-03-01', status:'Ativo',
+     jornada:{entrada:'08:00',intervaloInicio:'12:00',intervaloFim:'13:00',saida:'18:00'}},
+    {id:'e2', nome:'Maria Souza', cpf:'987.654.321-00', matricula:'0002', cargo:'Coordenadora', setor:'RH',
+     salario:3800, cargaMensal:220, admissao:'2022-06-15', status:'Ativo',
+     jornada:{entrada:'09:00',intervaloInicio:'12:30',intervaloFim:'13:30',saida:'18:00'}},
+  ];
+  const users = [
+    {id:'u1', username:'admin', password:'admin123', role:'admin', nome:'Administrador', employeeId:null},
+    {id:'u2', username:'rh', password:'rh123', role:'rh', nome:'RH Master', employeeId:'e2'},
+    {id:'u3', username:'joao', password:'123456', role:'funcionario', nome:'João da Silva', employeeId:'e1'},
+  ];
+  const settings = { empresa:'Minha Empresa Ltda', toleranciaAtraso:5, percentualExtra:50, percentualExtraFeriado:100, cargaMensalPadrao:220 };
+  dbSet('employees', employees);
+  dbSet('users', users);
+  dbSet('settings', settings);
+  dbSet('records', []);
+  dbSet('holidays', [{data:'2026-12-25', nome:'Natal'}, {data:'2026-01-01', nome:'Confraternização Universal'}]);
+  dbSet('corrections', []);
+  dbSet('audit', []);
+  dbSet('closures', []);
+  localStorage.setItem('rp_seeded','1');
+}
+seedDatabase();
+
+function logAudit(acao){
+  const audit = dbGet('audit');
+  audit.unshift({data:new Date().toISOString(), usuario:currentUser?currentUser.nome:'Sistema', acao});
+  dbSet('audit', audit);
+}
+
+function horaParaMin(hhmm){
+  if(!hhmm) return null;
+  const [h,m] = hhmm.split(':').map(Number);
+  return h*60+m;
+}
+function minParaHora(min){
+  const neg = min < 0; min = Math.abs(Math.round(min));
+  const h = Math.floor(min/60), m = min%60;
+  return (neg?'-':'')+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+}
+function hojeISO(){ return new Date().toISOString().slice(0,10); }
+function horaAgora(){ return new Date().toTimeString().slice(0,5); }
+function nomeMes(m){ return ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][m]; }
+function formatBRL(v){ return 'R$ '+ (v||0).toFixed(2).replace('.',','); }
+function formatDataBR(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-'); return `${d}/${m}/${y}`; }
+
+function calcularTrabalhadoDia(regsDoDia){
+  const tipos = {};
+  regsDoDia.forEach(r=>tipos[r.tipo]=r.hora);
+  if(!tipos['Entrada']) return 0;
+  let total = 0;
+  const ent = horaParaMin(tipos['Entrada']);
+  const saiInt = tipos['Saída Intervalo'] ? horaParaMin(tipos['Saída Intervalo']) : null;
+  const ret = tipos['Retorno'] ? horaParaMin(tipos['Retorno']) : null;
+  const sai = tipos['Saída'] ? horaParaMin(tipos['Saída']) : null;
+  function diff(a,b){ let d=b-a; if(d<0) d+=24*60; return d; }
+  if(saiInt!==null){
+    total += diff(ent, saiInt);
+    if(ret!==null && sai!==null) total += diff(ret, sai);
+  } else if(sai!==null){
+    total += diff(ent, sai);
+  }
+  return total;
+}
+
+function horasPrevistasDia(func){
+  const j = func.jornada;
+  const ent = horaParaMin(j.entrada), int1 = horaParaMin(j.intervaloInicio), int2 = horaParaMin(j.intervaloFim), sai = horaParaMin(j.saida);
+  function diff(a,b){ let d=b-a; if(d<0) d+=24*60; return d; }
+  return diff(ent,int1) + diff(int2,sai);
+}
+
+function proximoTipo(regsDoDia){
+  const tipos = regsDoDia.map(r=>r.tipo);
+  if(!tipos.includes('Entrada')) return 'Entrada';
+  if(!tipos.includes('Saída Intervalo')) return 'Saída Intervalo';
+  if(!tipos.includes('Retorno')) return 'Retorno';
+  if(!tipos.includes('Saída')) return 'Saída';
+  return null;
+}
+
+let currentUser = null;
+
+function fazerLogin(){
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  const users = dbGet('users');
+  const found = users.find(x=>x.username===u && x.password===p);
+  if(!found){ document.getElementById('loginErro').textContent='Usuário ou senha inválidos.'; return; }
+  currentUser = found;
+  sessionStorage.setItem('rp_session', JSON.stringify(found));
+  document.getElementById('loginErro').textContent='';
+  entrarNoApp();
+}
+function fazerLogout(){
+  sessionStorage.removeItem('rp_session');
+  currentUser = null;
+  document.getElementById('appScreen').style.display='none';
+  document.getElementById('loginScreen').style.display='flex';
+  document.getElementById('loginUser').value='';
+  document.getElementById('loginPass').value='';
+}
+function verificarSessao(){
+  try{
+    const s = JSON.parse(sessionStorage.getItem('rp_session'));
+    if(s){ currentUser = s; entrarNoApp(); }
+  }catch(e){}
+}
+
+const MENUS = {
+  admin:[['dashboard','📊 Dashboard'],['ponto','🕐 Registrar Ponto'],['colaboradores','👥 Colaboradores'],
+    ['espelho','📋 Espelho de Ponto'],['horasextras','⏱ Horas Extras'],['bancohoras','🏦 Banco de Horas'],
+    ['atrasos','⚠️ Atrasos e Faltas'],['folha','💰 Folha'],['relatorios','📁 Relatórios'],
+    ['feriados','📅 Feriados'],['correcoes','✏️ Correções'],['auditoria','🔍 Auditoria'],['config','⚙️ Configurações']],
+  rh:[['dashboard','📊 Dashboard'],['ponto','🕐 Registrar Ponto'],['colaboradores','👥 Colaboradores'],
+    ['espelho','📋 Espelho de Ponto'],['horasextras','⏱ Horas Extras'],['bancohoras','🏦 Banco de Horas'],
+    ['atrasos','⚠️ Atrasos e Faltas'],['folha','💰 Folha'],['relatorios','📁 Relatórios'],
+    ['feriados','📅 Feriados'],['correcoes','✏️ Correções']],
+  funcionario:[['ponto','🕐 Registrar Ponto'],['espelho','📋 Meu Espelho'],['bancohoras','🏦 Meu Banco de Horas'],
+    ['correcoes','✏️ Solicitar Correção']]
+};
+
+function entrarNoApp(){
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('appScreen').style.display='block';
+  document.getElementById('userInfo').textContent = currentUser.nome + ' · ' + rotuloPerfil(currentUser.role);
+  renderMenu();
+  const inicial = currentUser.role==='funcionario' ? 'ponto' : 'dashboard';
+  navegar(inicial);
+}
+function rotuloPerfil(r){ return {admin:'Administrador',rh:'RH / Gestor',funcionario:'Funcionário'}[r]||r; }
+
+function renderMenu(){
+  const menu = MENUS[currentUser.role] || [];
+  document.getElementById('navMenu').innerHTML = menu.map(([id,label])=>
+    `<a class="nav-item" data-view="${id}" onclick="navegar('${id}')">${label}</a>`
+  ).join('');
+}
+
+let viewAtual = 'dashboard';
+function navegar(view){
+  viewAtual = view;
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('ativo', el.dataset.view===view));
+  document.getElementById('sidebar').classList.remove('aberta');
+  const renderers = {
+    dashboard: renderDashboard, ponto: renderPonto, colaboradores: renderColaboradores,
+    espelho: renderEspelho, horasextras: renderHorasExtras, bancohoras: renderBancoHoras,
+    atrasos: renderAtrasos, folha: renderFolha, relatorios: renderRelatorios,
+    feriados: renderFeriados, correcoes: renderCorrecoes, auditoria: renderAuditoria, config: renderConfig
+  };
+  (renderers[view] || renderDashboard)();
+}
+
+function meuFuncionario(){
+  if(!currentUser.employeeId) return null;
+  return dbGet('employees').find(e=>e.id===currentUser.employeeId);
+}
+
+function renderDashboard(){
+  const emp = dbGet('employees');
+  const ativos = emp.filter(e=>e.status==='Ativo');
+  const hoje = hojeISO();
+  const records = dbGet('records').filter(r=>r.date===hoje);
+  const presentesIds = new Set(records.filter(r=>r.tipo==='Entrada').map(r=>r.employeeId));
+  const ausentes = ativos.length - presentesIds.size;
+  let atrasosHoje = 0;
+  ativos.forEach(f=>{
+    const ent = records.find(r=>r.employeeId===f.id && r.tipo==='Entrada');
+    if(ent){
+      const prevista = horaParaMin(f.jornada.entrada) + (dbGet('settings').toleranciaAtraso||0);
+      if(horaParaMin(ent.hora) > prevista) atrasosHoje++;
+    }
+  });
+  const mesAtual = new Date().getMonth();
+  const anoAtual = new Date().getFullYear();
+  let horasExtrasMes=0, horasTrabMes=0;
+  ativos.forEach(f=>{
+    const r = calcularResumoMensal(f, anoAtual, mesAtual);
+    horasExtrasMes += r.extraMin; horasTrabMes += r.trabalhadoMin;
+  });
+  const closures = dbGet('closures');
+  const fechadas = closures.filter(c=>c.ano===anoAtual && c.mes===mesAtual).length;
+
+  document.getElementById('content').innerHTML = `
+    <h1>Dashboard</h1>
+    <div class="grid-cards">
+      <div class="stat-card"><div class="num">${ativos.length}</div><div class="label">Funcionários ativos</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--verde)">${presentesIds.size}</div><div class="label">Presentes hoje</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--vermelho)">${Math.max(ausentes,0)}</div><div class="label">Ausentes hoje</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--amarelo)">${atrasosHoje}</div><div class="label">Atrasos hoje</div></div>
+      <div class="stat-card"><div class="num">${minParaHora(horasExtrasMes)}</div><div class="label">Horas extras (mês)</div></div>
+      <div class="stat-card"><div class="num">${minParaHora(horasTrabMes)}</div><div class="label">Horas trabalhadas (mês)</div></div>
+      <div class="stat-card"><div class="num">${fechadas}</div><div class="label">Folhas fechadas (mês)</div></div>
+      <div class="stat-card"><div class="num">${ativos.length-fechadas}</div><div class="label">Folhas em aberto</div></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Horas extras por funcionário (mês atual)</h3>
+      ${ativos.map(f=>{
+        const r = calcularResumoMensal(f, anoAtual, mesAtual);
+        const pct = Math.min(100, (r.extraMin/60)*8);
+        return `<div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:3px">
+            <span>${f.nome}</span><span>${minParaHora(r.extraMin)}</span>
+          </div>
+          <div style="background:#e2e8f0;border-radius:6px;height:8px;">
+            <div style="background:var(--azul);width:${pct}%;height:8px;border-radius:6px;"></div>
+          </div>
+        </div>`;
+      }).join('') || '<p style="color:var(--cinza)">Nenhum colaborador cadastrado.</p>'}
+    </div>
+  `;
+}
+
+function renderPonto(){
+  const func = currentUser.role==='funcionario' ? meuFuncionario() : (dbGet('employees')[0]||null);
+  if(!func){ document.getElementById('content').innerHTML = '<h1>Registrar Ponto</h1><p>Nenhum colaborador vinculado a este usuário.</p>'; return; }
+
+  const empregadosSelect = currentUser.role!=='funcionario' ? `
+    <div style="max-width:300px;margin:0 auto 20px">
+      <label>Selecionar colaborador</label>
+      <select id="selFuncPonto" onchange="pontoFuncSelecionado=this.value; renderPonto()">
+        ${dbGet('employees').map(e=>`<option value="${e.id}" ${e.id===pontoFuncSelecionado?'selected':''}>${e.nome}</option>`).join('')}
+      </select>
+    </div>` : '';
+
+  const alvo = currentUser.role!=='funcionario' ? (dbGet('employees').find(e=>e.id===pontoFuncSelecionado) || func) : func;
+  const hoje = hojeISO();
+  const regsHoje = dbGet('records').filter(r=>r.employeeId===alvo.id && r.date===hoje);
+  const prox = proximoTipo(regsHoje);
+  const trabalhadoMin = calcularTrabalhadoDia(regsHoje);
+  const previstoMin = horasPrevistasDia(alvo);
+  const saldo = trabalhadoMin - previstoMin;
+
+  const cores = {'Entrada':'var(--verde)','Saída Intervalo':'var(--amarelo)','Retorno':'var(--azul)','Saída':'var(--vermelho)'};
+
+  document.getElementById('content').innerHTML = `
+    <h1>Registrar Ponto</h1>
+    ${empregadosSelect}
+    <div class="card ponto-central">
+      <div style="font-weight:600;font-size:1.1rem;margin-bottom:2px">${alvo.nome}</div>
+      <div class="hora" id="relogioPonto">--:--:--</div>
+      <div class="data" id="dataPonto"></div>
+      ${prox ? `<button class="btn-ponto" style="background:${cores[prox]}" onclick="registrarPonto('${alvo.id}','${prox}')">${prox==='Entrada'?'REGISTRAR ENTRADA':prox.toUpperCase()}</button>`
+             : `<div class="badge badge-verde" style="font-size:1rem;padding:10px 24px">Jornada de hoje concluída ✓</div>`}
+      <div class="linha-status">
+        ${['Entrada','Saída Intervalo','Retorno','Saída'].map(t=>{
+          const r = regsHoje.find(x=>x.tipo===t);
+          return `<div><div class="val">${r?r.hora:'--:--'}</div><div class="lbl">${t}</div></div>`;
+        }).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="linha-status" style="justify-content:space-around">
+        <div><div class="val">${alvo.jornada.entrada} às ${alvo.jornada.saida}</div><div class="lbl">Jornada de hoje</div></div>
+        <div><div class="val">${minParaHora(trabalhadoMin)}</div><div class="lbl">Trabalhado hoje</div></div>
+        <div><div class="val" style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'}">${saldo>=0?'+':''}${minParaHora(saldo)}</div><div class="lbl">Saldo de hoje</div></div>
+      </div>
+    </div>
+  `;
+  atualizarRelogioPonto();
+}
+let pontoFuncSelecionado = (dbGet('employees')[0]||{}).id;
+function atualizarRelogioPonto(){
+  const el = document.getElementById('relogioPonto'); if(!el) return;
+  const agora = new Date();
+  el.textContent = agora.toLocaleTimeString('pt-BR');
+  document.getElementById('dataPonto').textContent = agora.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+}
+setInterval(()=>{ if(viewAtual==='ponto') atualizarRelogioPonto(); }, 1000);
+
+function registrarPonto(employeeId, tipo){
+  const records = dbGet('records');
+  records.push({id:uid(), employeeId, date:hojeISO(), tipo, hora:horaAgora(), registradoPor:currentUser.nome, timestamp:Date.now()});
+  dbSet('records', records);
+  logAudit(`Registro de ponto: ${tipo} para ${dbGet('employees').find(e=>e.id===employeeId)?.nome} às ${horaAgora()}`);
+  renderPonto();
+}
+
+function renderColaboradores(){
+  const emp = dbGet('employees');
+  document.getElementById('content').innerHTML = `
+    <h1>Colaboradores</h1>
+    <div style="margin-bottom:14px"><button class="btn btn-azul" onclick="abrirModalColaborador()">+ Novo Colaborador</button></div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Nome</th><th>Cargo</th><th>Setor</th><th>Salário</th><th>Jornada</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          ${emp.map(e=>`<tr>
+            <td>${e.nome}</td><td>${e.cargo}</td><td>${e.setor}</td><td>${formatBRL(e.salario)}</td>
+            <td>${e.jornada.entrada}-${e.jornada.saida}</td>
+            <td><span class="badge ${e.status==='Ativo'?'badge-verde':'badge-cinza'}">${e.status}</span></td>
+            <td><button class="icon-btn" onclick="abrirModalColaborador('${e.id}')">Editar</button>
+                <button class="icon-btn del" onclick="excluirColaborador('${e.id}')">Excluir</button></td>
+          </tr>`).join('') || '<tr><td colspan="7" style="color:var(--cinza)">Nenhum colaborador cadastrado.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+function excluirColaborador(id){
+  if(!confirm('Inativar este colaborador?')) return;
+  const emp = dbGet('employees');
+  const alvo = emp.find(e=>e.id===id); alvo.status='Inativo';
+  dbSet('employees', emp);
+  logAudit(`Colaborador inativado: ${alvo.nome}`);
+  renderColaboradores();
+}
+function abrirModalColaborador(id){
+  const emp = dbGet('employees');
+  const e = id ? emp.find(x=>x.id===id) : {nome:'',cpf:'',matricula:'',cargo:'',setor:'',salario:0,cargaMensal:220,admissao:hojeISO(),status:'Ativo',jornada:{entrada:'08:00',intervaloInicio:'12:00',intervaloFim:'13:00',saida:'18:00'}};
+  document.getElementById('modalBox').innerHTML = `
+    <h2>${id?'Editar':'Novo'} Colaborador</h2>
+    <div class="form-grid">
+      <div class="full"><label>Nome completo</label><input id="fNome" value="${e.nome}"></div>
+      <div><label>CPF</label><input id="fCpf" value="${e.cpf}"></div>
+      <div><label>Matrícula</label><input id="fMat" value="${e.matricula}"></div>
+      <div><label>Cargo</label><input id="fCargo" value="${e.cargo}"></div>
+      <div><label>Setor</label><input id="fSetor" value="${e.setor}"></div>
+      <div><label>Salário (R$)</label><input id="fSalario" type="number" step="0.01" value="${e.salario}"></div>
+      <div><label>Carga horária mensal</label><input id="fCarga" type="number" value="${e.cargaMensal}"></div>
+      <div><label>Data de admissão</label><input id="fAdmissao" type="date" value="${e.admissao}"></div>
+      <div><label>Status</label><select id="fStatus"><option ${e.status==='Ativo'?'selected':''}>Ativo</option><option ${e.status==='Inativo'?'selected':''}>Inativo</option></select></div>
+      <div class="full" style="border-top:1px solid var(--borda);margin-top:14px;padding-top:6px"><b>Jornada de trabalho</b></div>
+      <div><label>Entrada</label><input id="fEntrada" type="time" value="${e.jornada.entrada}"></div>
+      <div><label>Saída</label><input id="fSaida" type="time" value="${e.jornada.saida}"></div>
+      <div><label>Início intervalo</label><input id="fInt1" type="time" value="${e.jornada.intervaloInicio}"></div>
+      <div><label>Fim intervalo</label><input id="fInt2" type="time" value="${e.jornada.intervaloFim}"></div>
+    </div>
+    <div class="modal-acoes">
+      <button class="btn btn-cinza" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-azul" onclick="salvarColaborador('${id||''}')">Salvar</button>
+    </div>
+  `;
+  abrirModal();
+}
+function salvarColaborador(id){
+  const emp = dbGet('employees');
+  const dados = {
+    nome:val('fNome'), cpf:val('fCpf'), matricula:val('fMat'), cargo:val('fCargo'), setor:val('fSetor'),
+    salario:parseFloat(val('fSalario'))||0, cargaMensal:parseInt(val('fCarga'))||220, admissao:val('fAdmissao'),
+    status:val('fStatus'),
+    jornada:{entrada:val('fEntrada'),saida:val('fSaida'),intervaloInicio:val('fInt1'),intervaloFim:val('fInt2')}
+  };
+  if(id){
+    const idx = emp.findIndex(e=>e.id===id);
+    emp[idx] = {...emp[idx], ...dados};
+    logAudit(`Colaborador editado: ${dados.nome}`);
+  } else {
+    emp.push({id:uid(), ...dados});
+    logAudit(`Colaborador cadastrado: ${dados.nome}`);
+  }
+  dbSet('employees', emp);
+  fecharModal();
+  renderColaboradores();
+}
+function val(id){ return document.getElementById(id).value; }
+
+function renderEspelho(){
+  const emp = dbGet('employees');
+  const isFunc = currentUser.role==='funcionario';
+  const alvoPadrao = isFunc ? meuFuncionario()?.id : (espelhoFuncId || emp[0]?.id);
+  const hoje = new Date();
+  const mes = espelhoMes ?? hoje.getMonth();
+  const ano = espelhoAno ?? hoje.getFullYear();
+
+  document.getElementById('content').innerHTML = `
+    <h1>${isFunc?'Meu Espelho de Ponto':'Espelho de Ponto'}</h1>
+    <div class="filtros">
+      ${!isFunc?`<div><label>Colaborador</label><select id="fEspFunc" onchange="espelhoFuncId=this.value; renderEspelho()">
+        ${emp.map(e=>`<option value="${e.id}" ${e.id===alvoPadrao?'selected':''}>${e.nome}</option>`).join('')}
+      </select></div>`:''}
+      <div><label>Mês</label><select id="fEspMes" onchange="espelhoMes=parseInt(this.value); renderEspelho()">
+        ${[...Array(12).keys()].map(m=>`<option value="${m}" ${m===mes?'selected':''}>${nomeMes(m)}</option>`).join('')}
+      </select></div>
+      <div><label>Ano</label><input type="number" id="fEspAno" value="${ano}" onchange="espelhoAno=parseInt(this.value); renderEspelho()"></div>
+    </div>
+    <div id="espelhoTabela"></div>
+  `;
+  const func = emp.find(e=>e.id===alvoPadrao);
+  if(!func){ document.getElementById('espelhoTabela').innerHTML = '<p style="color:var(--cinza)">Nenhum colaborador selecionado.</p>'; return; }
+  const dias = new Date(ano, mes+1, 0).getDate();
+  const records = dbGet('records').filter(r=>r.employeeId===func.id);
+  const holidays = new Set(dbGet('holidays').map(h=>h.data));
+  let totalTrab=0, totalPrev=0, totalExtra=0, totalAtraso=0;
+  let linhas = '';
+  for(let d=1; d<=dias; d++){
+    const dataISO = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const regsDia = records.filter(r=>r.date===dataISO);
+    const tipos = {}; regsDia.forEach(r=>tipos[r.tipo]=r.hora);
+    const trabMin = calcularTrabalhadoDia(regsDia);
+    const isHoliday = holidays.has(dataISO);
+    const prevMin = isHoliday ? 0 : horasPrevistasDia(func);
+    const extraMin = Math.max(0, trabMin - prevMin);
+    let atrasoMin = 0;
+    if(tipos['Entrada']){
+      const tol = dbGet('settings').toleranciaAtraso||0;
+      atrasoMin = Math.max(0, horaParaMin(tipos['Entrada']) - horaParaMin(func.jornada.entrada) - tol);
+    }
+    totalTrab += trabMin; totalPrev += prevMin; totalExtra += extraMin; totalAtraso += atrasoMin;
+    if(regsDia.length===0 && prevMin===0) continue;
+    linhas += `<tr>
+      <td>${String(d).padStart(2,'0')}/${String(mes+1).padStart(2,'0')} ${isHoliday?'<span class="badge badge-amarelo">Feriado</span>':''}</td>
+      <td>${tipos['Entrada']||'-'}</td><td>${tipos['Saída Intervalo']||'-'}</td>
+      <td>${tipos['Retorno']||'-'}</td><td>${tipos['Saída']||'-'}</td>
+      <td>${minParaHora(trabMin)}</td><td>${minParaHora(prevMin)}</td>
+      <td style="color:var(--verde)">${extraMin>0?minParaHora(extraMin):'-'}</td>
+      <td style="color:var(--vermelho)">${atrasoMin>0?minParaHora(atrasoMin):'-'}</td>
+    </tr>`;
+  }
+  document.getElementById('espelhoTabela').innerHTML = `
+    <div class="grid-cards">
+      <div class="stat-card"><div class="num">${minParaHora(totalTrab)}</div><div class="label">Total trabalhado</div></div>
+      <div class="stat-card"><div class="num">${minParaHora(totalPrev)}</div><div class="label">Total previsto</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--verde)">${minParaHora(totalExtra)}</div><div class="label">Horas extras</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--vermelho)">${minParaHora(totalAtraso)}</div><div class="label">Atrasos</div></div>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Data</th><th>Entrada</th><th>Saída Int.</th><th>Retorno</th><th>Saída</th><th>Trabalhado</th><th>Previsto</th><th>Extra</th><th>Atraso</th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="9" style="color:var(--cinza)">Nenhum registro neste mês.</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+}
+let espelhoFuncId=null, espelhoMes=null, espelhoAno=null;
+
+function calcularResumoMensal(func, ano, mes){
+  const dias = new Date(ano, mes+1, 0).getDate();
+  const records = dbGet('records').filter(r=>r.employeeId===func.id);
+  const holidays = new Set(dbGet('holidays').map(h=>h.data));
+  const settings = dbGet('settings');
+  let trabalhadoMin=0, previstoMin=0, extraMin=0, atrasoMin=0, faltas=0;
+  const hojeStr = hojeISO();
+  for(let d=1; d<=dias; d++){
+    const dataISO = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if(dataISO > hojeStr) continue;
+    const regsDia = records.filter(r=>r.date===dataISO);
+    const tipos = {}; regsDia.forEach(r=>tipos[r.tipo]=r.hora);
+    const isHoliday = holidays.has(dataISO);
+    const diaSemana = new Date(dataISO+'T12:00:00').getDay();
+    const prevDia = isHoliday ? 0 : horasPrevistasDia(func);
+    const trabDia = calcularTrabalhadoDia(regsDia);
+    trabalhadoMin += trabDia; previstoMin += prevDia;
+    extraMin += Math.max(0, trabDia - prevDia);
+    if(tipos['Entrada']){
+      atrasoMin += Math.max(0, horaParaMin(tipos['Entrada']) - horaParaMin(func.jornada.entrada) - (settings.toleranciaAtraso||0));
+    } else if(prevDia>0 && diaSemana!==0 && diaSemana!==6){
+      faltas++;
+    }
+  }
+  const valorHora = func.salario / (func.cargaMensal||220) / 60;
+  const valorExtra = extraMin * valorHora * (1 + (settings.percentualExtra||50)/100);
+  return {trabalhadoMin, previstoMin, extraMin, atrasoMin, faltas, valorHora, valorExtra};
+}
+
+function renderHorasExtras(){
+  const emp = dbGet('employees').filter(e=>e.status==='Ativo');
+  const hoje = new Date(); const mes = hoje.getMonth(), ano = hoje.getFullYear();
+  document.getElementById('content').innerHTML = `
+    <h1>Horas Extras (${nomeMes(mes)}/${ano})</h1>
+    <div class="card">
+      <table>
+        <thead><tr><th>Colaborador</th><th>Horas Extras</th><th>Valor Hora</th><th>% Aplicado</th><th>Valor Total</th></tr></thead>
+        <tbody>
+          ${emp.map(f=>{
+            const r = calcularResumoMensal(f, ano, mes);
+            return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td>${formatBRL(r.valorHora)}</td>
+              <td>${dbGet('settings').percentualExtra}%</td><td>${formatBRL(r.valorExtra)}</td></tr>`;
+          }).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderBancoHoras(){
+  const isFunc = currentUser.role==='funcionario';
+  const emp = isFunc ? [meuFuncionario()].filter(Boolean) : dbGet('employees').filter(e=>e.status==='Ativo');
+  const hoje = new Date(); const mes = hoje.getMonth(), ano = hoje.getFullYear();
+  document.getElementById('content').innerHTML = `
+    <h1>${isFunc?'Meu Banco de Horas':'Banco de Horas'}</h1>
+    <div class="card">
+      <table>
+        <thead><tr><th>Colaborador</th><th>Horas Trabalhadas</th><th>Horas Previstas</th><th>Saldo do Mês</th></tr></thead>
+        <tbody>
+          ${emp.map(f=>{
+            const r = calcularResumoMensal(f, ano, mes);
+            const saldo = r.trabalhadoMin - r.previstoMin;
+            return `<tr><td>${f.nome}</td><td>${minParaHora(r.trabalhadoMin)}</td><td>${minParaHora(r.previstoMin)}</td>
+              <td style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'};font-weight:600">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>`;
+          }).join('') || '<tr><td colspan="4" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderAtrasos(){
+  const emp = dbGet('employees').filter(e=>e.status==='Ativo');
+  const hoje = new Date(); const mes = hoje.getMonth(), ano = hoje.getFullYear();
+  document.getElementById('content').innerHTML = `
+    <h1>Atrasos e Faltas (${nomeMes(mes)}/${ano})</h1>
+    <div class="card">
+      <table>
+        <thead><tr><th>Colaborador</th><th>Total de Atrasos</th><th>Faltas no Mês</th></tr></thead>
+        <tbody>
+          ${emp.map(f=>{
+            const r = calcularResumoMensal(f, ano, mes);
+            return `<tr><td>${f.nome}</td>
+              <td style="color:${r.atrasoMin>0?'var(--vermelho)':'inherit'}">${minParaHora(r.atrasoMin)}</td>
+              <td style="color:${r.faltas>0?'var(--vermelho)':'inherit'}">${r.faltas}</td></tr>`;
+          }).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderFolha(){
+  const emp = dbGet('employees').filter(e=>e.status==='Ativo');
+  const hoje = new Date();
+  const mes = folhaMes ?? hoje.getMonth(), ano = folhaAno ?? hoje.getFullYear();
+  const closures = dbGet('closures');
+
+  document.getElementById('content').innerHTML = `
+    <h1>Fechamento de Folha</h1>
+    <div class="filtros">
+      <div><label>Mês</label><select onchange="folhaMes=parseInt(this.value); renderFolha()">
+        ${[...Array(12).keys()].map(m=>`<option value="${m}" ${m===mes?'selected':''}>${nomeMes(m)}</option>`).join('')}
+      </select></div>
+      <div><label>Ano</label><input type="number" value="${ano}" onchange="folhaAno=parseInt(this.value); renderFolha()"></div>
+    </div>
+    <div class="aviso">⚠️ Este cálculo é uma ferramenta de apoio baseada nos registros de ponto. Confirme sempre com a política da empresa e orientação contábil antes de aplicar valores oficiais.</div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Colaborador</th><th>Salário Base</th><th>Horas Trab.</th><th>Extras</th><th>Atrasos</th><th>Faltas</th><th>Total Extra (R$)</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          ${emp.map(f=>{
+            const r = calcularResumoMensal(f, ano, mes);
+            const fechada = closures.find(c=>c.employeeId===f.id && c.ano===ano && c.mes===mes);
+            return `<tr>
+              <td>${f.nome}</td><td>${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
+              <td>${minParaHora(r.extraMin)}</td><td>${minParaHora(r.atrasoMin)}</td><td>${r.faltas}</td>
+              <td>${formatBRL(r.valorExtra)}</td>
+              <td>${fechada?'<span class="badge badge-verde">Fechada</span>':'<span class="badge badge-amarelo">Aberta</span>'}</td>
+              <td>${fechada
+                ? (currentUser.role==='admin' ? `<button class="icon-btn" onclick="reabrirFolha('${f.id}',${ano},${mes})">Reabrir</button>` : '')
+                : `<button class="icon-btn" onclick="fecharFolha('${f.id}',${ano},${mes})">Fechar</button>`}</td>
+            </tr>`;
+          }).join('') || '<tr><td colspan="9" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+let folhaMes=null, folhaAno=null;
+function fecharFolha(employeeId, ano, mes){
+  if(!confirm('Confirmar fechamento da folha deste colaborador para o período? Isso bloqueará novas alterações retroativas.')) return;
+  const closures = dbGet('closures');
+  const func = dbGet('employees').find(e=>e.id===employeeId);
+  const resumo = calcularResumoMensal(func, ano, mes);
+  closures.push({id:uid(), employeeId, ano, mes, fechadoPor:currentUser.nome, data:new Date().toISOString(), resumo});
+  dbSet('closures', closures);
+  logAudit(`Folha fechada: ${func.nome} - ${nomeMes(mes)}/${ano}`);
+  renderFolha();
+}
+function reabrirFolha(employeeId, ano, mes){
+  if(!confirm('Reabrir esta folha? (somente administrador)')) return;
+  let closures = dbGet('closures');
+  const alvo = closures.find(c=>c.employeeId===employeeId && c.ano===ano && c.mes===mes);
+  closures = closures.filter(c=>c!==alvo);
+  dbSet('closures', closures);
+  const func = dbGet('employees').find(e=>e.id===employeeId);
+  logAudit(`Folha reaberta: ${func.nome} - ${nomeMes(mes)}/${ano} (por ${currentUser.nome})`);
+  renderFolha();
+}
+
+function renderRelatorios(){
+  document.getElementById('content').innerHTML = `
+    <h1>Relatórios</h1>
+    <div class="card">
+      <p>Exporte os dados abaixo em formato CSV (compatível com Excel).</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-azul" onclick="exportarCSVRegistros()">📁 Relatório de Ponto (todas as marcações)</button>
+        <button class="btn btn-azul" onclick="exportarCSVResumo()">📁 Relatório de Horas Trabalhadas / Extras (mês atual)</button>
+        <button class="btn btn-azul" onclick="exportarCSVColaboradores()">📁 Relatório de Colaboradores</button>
+      </div>
+    </div>
+  `;
+}
+function baixarCSV(nomeArq, linhas){
+  const csv = linhas.map(l=>l.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob(["\uFEFF"+csv], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = nomeArq; a.click();
+}
+function exportarCSVRegistros(){
+  const emp = dbGet('employees');
+  const records = dbGet('records');
+  const linhas = [['Colaborador','Data','Tipo','Hora','Registrado por']];
+  records.forEach(r=>{
+    const f = emp.find(e=>e.id===r.employeeId);
+    linhas.push([f?f.nome:'?', formatDataBR(r.date), r.tipo, r.hora, r.registradoPor||'']);
+  });
+  baixarCSV('relatorio_ponto.csv', linhas);
+}
+function exportarCSVResumo(){
+  const emp = dbGet('employees').filter(e=>e.status==='Ativo');
+  const hoje = new Date();
+  const linhas = [['Colaborador','Horas Trabalhadas','Horas Previstas','Horas Extras','Atrasos','Faltas','Valor Extra (R$)']];
+  emp.forEach(f=>{
+    const r = calcularResumoMensal(f, hoje.getFullYear(), hoje.getMonth());
+    linhas.push([f.nome, minParaHora(r.trabalhadoMin), minParaHora(r.previstoMin), minParaHora(r.extraMin), minParaHora(r.atrasoMin), r.faltas, r.valorExtra.toFixed(2)]);
+  });
+  baixarCSV('relatorio_horas.csv', linhas);
+}
+function exportarCSVColaboradores(){
+  const emp = dbGet('employees');
+  const linhas = [['Nome','CPF','Matrícula','Cargo','Setor','Salário','Status','Admissão']];
+  emp.forEach(e=>linhas.push([e.nome,e.cpf,e.matricula,e.cargo,e.setor,e.salario,e.status,formatDataBR(e.admissao)]));
+  baixarCSV('colaboradores.csv', linhas);
+}
+
+function renderFeriados(){
+  const holidays = dbGet('holidays').sort((a,b)=>a.data.localeCompare(b.data));
+  document.getElementById('content').innerHTML = `
+    <h1>Feriados</h1>
+    <div class="card">
+      <div class="form-grid" style="margin-bottom:14px">
+        <div><label>Data</label><input type="date" id="novoFerData"></div>
+        <div><label>Nome do feriado</label><input id="novoFerNome" placeholder="ex: Natal"></div>
+      </div>
+      <button class="btn btn-azul" onclick="adicionarFeriado()">+ Adicionar Feriado</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Data</th><th>Feriado</th><th></th></tr></thead>
+        <tbody>${holidays.map(h=>`<tr><td>${formatDataBR(h.data)}</td><td>${h.nome}</td>
+          <td><button class="icon-btn del" onclick="removerFeriado('${h.data}')">Excluir</button></td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum feriado cadastrado.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+function adicionarFeriado(){
+  const data = val('novoFerData'), nome = val('novoFerNome');
+  if(!data || !nome){ alert('Preencha data e nome do feriado.'); return; }
+  const holidays = dbGet('holidays');
+  holidays.push({data, nome});
+  dbSet('holidays', holidays);
+  logAudit(`Feriado cadastrado: ${nome} (${formatDataBR(data)})`);
+  renderFeriados();
+}
+function removerFeriado(data){
+  dbSet('holidays', dbGet('holidays').filter(h=>h.data!==data));
+  renderFeriados();
+}
+
+function renderCorrecoes(){
+  const isFunc = currentUser.role==='funcionario';
+  const todas = dbGet('corrections');
+  const lista = isFunc ? todas.filter(c=>c.employeeId===currentUser.employeeId) : todas;
+  const emp = dbGet('employees');
+
+  document.getElementById('content').innerHTML = `
+    <h1>${isFunc?'Solicitar Correção de Ponto':'Solicitações de Correção'}</h1>
+    ${isFunc ? `
+    <div class="card">
+      <div class="form-grid">
+        <div><label>Data</label><input type="date" id="corData" value="${hojeISO()}"></div>
+        <div><label>Horário correto</label><input type="time" id="corHora"></div>
+        <div class="full"><label>Motivo</label><input id="corMotivo" placeholder="ex: Esqueci de registrar a saída"></div>
+      </div>
+      <button class="btn btn-azul" style="margin-top:12px" onclick="solicitarCorrecao()">Enviar Solicitação</button>
+    </div>` : ''}
+    <div class="card">
+      <table>
+        <thead><tr><th>${isFunc?'':'Colaborador'}</th><th>Data</th><th>Horário Solicitado</th><th>Motivo</th><th>Status</th>${!isFunc?'<th></th>':''}</tr></thead>
+        <tbody>
+          ${lista.map(c=>{
+            const f = emp.find(e=>e.id===c.employeeId);
+            const badge = c.status==='Aprovado'?'badge-verde':c.status==='Recusado'?'badge-vermelho':'badge-amarelo';
+            return `<tr>${isFunc?'':'<td>'+(f?f.nome:'?')+'</td>'}<td>${formatDataBR(c.data)}</td><td>${c.horario}</td><td>${c.motivo}</td>
+              <td><span class="badge ${badge}">${c.status}</span></td>
+              ${!isFunc && c.status==='Pendente' ? `<td><button class="icon-btn" onclick="responderCorrecao('${c.id}','Aprovado')">Aprovar</button>
+                <button class="icon-btn del" onclick="responderCorrecao('${c.id}','Recusado')">Recusar</button></td>` : (!isFunc?'<td></td>':'')}
+            </tr>`;
+          }).join('') || `<tr><td colspan="6" style="color:var(--cinza)">Nenhuma solicitação.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+function solicitarCorrecao(){
+  const corrections = dbGet('corrections');
+  corrections.push({id:uid(), employeeId:currentUser.employeeId, data:val('corData'), horario:val('corHora'), motivo:val('corMotivo'), status:'Pendente'});
+  dbSet('corrections', corrections);
+  logAudit(`Solicitação de correção enviada por ${currentUser.nome}`);
+  renderCorrecoes();
+}
+function responderCorrecao(id, status){
+  const corrections = dbGet('corrections');
+  const c = corrections.find(x=>x.id===id); c.status = status;
+  dbSet('corrections', corrections);
+  logAudit(`Correção ${status.toLowerCase()} por ${currentUser.nome}`);
+  renderCorrecoes();
+}
+
+function renderAuditoria(){
+  const audit = dbGet('audit');
+  document.getElementById('content').innerHTML = `
+    <h1>Auditoria</h1>
+    <div class="card">
+      <table>
+        <thead><tr><th>Data/Hora</th><th>Usuário</th><th>Ação</th></tr></thead>
+        <tbody>${audit.map(a=>`<tr><td>${new Date(a.data).toLocaleString('pt-BR')}</td><td>${a.usuario}</td><td>${a.acao}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum registro de auditoria.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderConfig(){
+  const s = dbGet('settings');
+  document.getElementById('content').innerHTML = `
+    <h1>Configurações</h1>
+    <div class="card" style="max-width:500px">
+      <label>Nome da empresa</label><input id="cfgEmpresa" value="${s.empresa}">
+      <label>Tolerância de atraso (minutos)</label><input id="cfgTolerancia" type="number" value="${s.toleranciaAtraso}">
+      <label>Percentual de hora extra em dia normal (%)</label><input id="cfgExtra" type="number" value="${s.percentualExtra}">
+      <label>Percentual de hora extra em feriado/domingo (%)</label><input id="cfgExtraFer" type="number" value="${s.percentualExtraFeriado}">
+      <label>Carga horária mensal padrão</label><input id="cfgCarga" type="number" value="${s.cargaMensalPadrao}">
+      <button class="btn btn-azul" style="margin-top:18px" onclick="salvarConfig()">Salvar Configurações</button>
+    </div>
+  `;
+}
+function salvarConfig(){
+  const s = {
+    empresa:val('cfgEmpresa'), toleranciaAtraso:parseInt(val('cfgTolerancia'))||0,
+    percentualExtra:parseFloat(val('cfgExtra'))||50, percentualExtraFeriado:parseFloat(val('cfgExtraFer'))||100,
+    cargaMensalPadrao:parseInt(val('cfgCarga'))||220
+  };
+  dbSet('settings', s);
+  logAudit('Configurações do sistema atualizadas');
+  alert('Configurações salvas.');
+  renderConfig();
+}
+
+function abrirModal(){ document.getElementById('modalBg').style.display='flex'; }
+function fecharModal(){ document.getElementById('modalBg').style.display='none'; }
+document.getElementById('modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg') fecharModal(); });
+
+document.getElementById('loginPass').addEventListener('keydown', e=>{ if(e.key==='Enter') fazerLogin(); });
+verificarSessao();
+</script>
+</body>
 </html>
+
