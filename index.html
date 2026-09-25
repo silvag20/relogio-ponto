@@ -19,9 +19,7 @@
     --cinza:#64748b; --borda:#e2e8f0;
   }
   *{box-sizing:border-box;}
-  body{margin:0;font-family:'Segoe UI',Arial,sans-serif;color:var(--texto);
-    background:linear-gradient(rgba(241,245,249,0.72),rgba(241,245,249,0.72)),url('assets/logo-grupo-calissa.png');
-    background-size:280px;background-position:center;background-repeat:no-repeat;background-attachment:fixed;}
+  body{margin:0;font-family:'Segoe UI',Arial,sans-serif;color:var(--texto);background:var(--fundo);}
   button{cursor:pointer;font-family:inherit;}
   input,select{font-family:inherit;padding:8px 10px;border:1px solid var(--borda);border-radius:6px;font-size:0.95rem;width:100%;}
   label{font-size:0.85rem;color:var(--cinza);display:block;margin-bottom:4px;margin-top:10px;}
@@ -41,7 +39,7 @@
   .badge-amarelo{background:#fef3c7;color:#92400e;}
   .badge-cinza{background:#e2e8f0;color:#475569;}
 
-  #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(30,58,138,0.55),rgba(37,99,235,0.55)),url('assets/logo-grupo-calissa.png');background-size:340px;background-position:center;background-repeat:no-repeat;background-attachment:fixed;}
+  #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a8a,#2563eb);}
   .login-box{background:rgba(255,255,255,0.97);padding:40px;border-radius:14px;width:340px;max-width:90vw;box-shadow:0 10px 40px rgba(0,0,0,0.35);backdrop-filter:blur(2px);}
   .login-box h1{font-size:1.4rem;text-align:center;margin-bottom:5px;}
   .login-box p{text-align:center;color:var(--cinza);font-size:0.85rem;margin-bottom:20px;}
@@ -52,7 +50,8 @@
   #appScreen{display:none;min-height:100vh;}
   .layout{display:flex;min-height:100vh;}
   .sidebar{width:230px;background:var(--azul-esc);color:#fff;padding:20px 0;flex-shrink:0;overflow-y:auto;}
-  .sidebar h2{font-size:1.05rem;padding:0 20px 15px;border-bottom:1px solid rgba(255,255,255,0.15);margin:0 0 10px;}
+  .sidebar h2{font-size:1.05rem;padding:0 20px 15px;border-bottom:1px solid rgba(255,255,255,0.15);margin:0 0 10px;display:flex;align-items:center;gap:8px;}
+  .sidebar h2 img{width:26px;height:26px;object-fit:contain;background:#fff;border-radius:6px;padding:2px;}
   .sidebar .user{padding:0 20px 15px;font-size:0.8rem;color:#c7d2fe;border-bottom:1px solid rgba(255,255,255,0.15);margin-bottom:10px;}
   .nav-item{display:block;padding:11px 20px;color:#dbeafe;text-decoration:none;font-size:0.9rem;cursor:pointer;border-left:3px solid transparent;}
   .nav-item:hover{background:rgba(255,255,255,0.08);}
@@ -144,7 +143,7 @@
 <div id="appScreen">
   <div class="layout">
     <aside class="sidebar" id="sidebar">
-      <h2>⏰ Ponto & RH</h2>
+      <h2><img src="assets/logo-grupo-calissa.png" alt="Grupo Calissa"> Ponto & RH</h2>
       <div class="user" id="userInfo"></div>
       <div id="navMenu"></div>
       <div class="sair">
