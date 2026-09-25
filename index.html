@@ -91,17 +91,14 @@
   <div class="login-box">
     <h1>⏰ Relógio de Ponto</h1>
     <p>Gestão de Funcionários e Jornada</p>
-    <label>Usuário</label>
-    <input id="loginUser" placeholder="ex: admin">
+    <label>E-mail</label>
+    <input id="loginUser" type="email" placeholder="seu@email.com">
     <label>Senha</label>
     <input id="loginPass" type="password" placeholder="••••••••">
     <button class="btn btn-azul" onclick="fazerLogin()">Entrar</button>
     <div class="erro" id="loginErro"></div>
     <div class="login-hint">
-      Usuários de demonstração:<br>
-      <b>admin / admin123</b> (Administrador)<br>
-      <b>rh / rh123</b> (RH/Gestor)<br>
-      <b>joao / 123456</b> (Funcionário)
+      Use o e-mail e senha criados em Authentication &gt; Users no painel do Supabase, com um perfil correspondente cadastrado na tabela "profiles".
     </div>
   </div>
 </div>
@@ -127,45 +124,71 @@
   <div class="modal" id="modalBox"></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const DB_KEYS = ['users','employees','records','holidays','settings','corrections','audit','closures'];
+/* ======================================================================
+   CONEXÃO COM O SUPABASE (banco de dados de verdade)
+   ====================================================================== */
+const SUPABASE_URL = 'https://hgiwasnyunvstlrlztmx.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_NA6OZSV9539QjnkKc9engg_Hshq1Jf-';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-function dbGet(key){ try{ return JSON.parse(localStorage.getItem('rp_'+key)) || []; }catch(e){ return []; } }
-function dbSet(key,val){ localStorage.setItem('rp_'+key, JSON.stringify(val)); }
+/* Estado local (cache em memória, sincronizado com o Supabase) */
+let state = { employees:[], records:[], holidays:[], settings:{}, corrections:[], audit:[], closures:[] };
+function dbGet(key){ return state[key] !== undefined ? state[key] : (key==='settings' ? {} : []); }
+function dbSet(key,val){ state[key] = val; }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
-function seedDatabase(){
-  if(localStorage.getItem('rp_seeded')) return;
-  const employees = [
-    {id:'e1', nome:'João da Silva', cpf:'123.456.789-00', matricula:'0001', cargo:'Analista', setor:'Operações',
-     salario:2500, cargaMensal:220, admissao:'2023-03-01', status:'Ativo',
-     jornada:{entrada:'08:00',intervaloInicio:'12:00',intervaloFim:'13:00',saida:'18:00'}},
-    {id:'e2', nome:'Maria Souza', cpf:'987.654.321-00', matricula:'0002', cargo:'Coordenadora', setor:'RH',
-     salario:3800, cargaMensal:220, admissao:'2022-06-15', status:'Ativo',
-     jornada:{entrada:'09:00',intervaloInicio:'12:30',intervaloFim:'13:30',saida:'18:00'}},
-  ];
-  const users = [
-    {id:'u1', username:'admin', password:'admin123', role:'admin', nome:'Administrador', employeeId:null},
-    {id:'u2', username:'rh', password:'rh123', role:'rh', nome:'RH Master', employeeId:'e2'},
-    {id:'u3', username:'joao', password:'123456', role:'funcionario', nome:'João da Silva', employeeId:'e1'},
-  ];
-  const settings = { empresa:'Minha Empresa Ltda', toleranciaAtraso:5, percentualExtra:50, percentualExtraFeriado:100, cargaMensalPadrao:220 };
-  dbSet('employees', employees);
-  dbSet('users', users);
-  dbSet('settings', settings);
-  dbSet('records', []);
-  dbSet('holidays', [{data:'2026-12-25', nome:'Natal'}, {data:'2026-01-01', nome:'Confraternização Universal'}]);
-  dbSet('corrections', []);
-  dbSet('audit', []);
-  dbSet('closures', []);
-  localStorage.setItem('rp_seeded','1');
+/* Conversores: linha do Supabase (snake_case) <-> objeto usado nas telas (camelCase) */
+function mapEmployeeFromDB(row){
+  return {
+    id: row.id, nome: row.nome, cpf: row.cpf, matricula: row.matricula, cargo: row.cargo, setor: row.setor,
+    salario: Number(row.salario)||0, cargaMensal: row.carga_horaria_mensal||220,
+    admissao: row.data_admissao, status: row.status,
+    jornada: {
+      entrada: (row.jornada_entrada||'08:00').slice(0,5),
+      intervaloInicio: (row.jornada_intervalo_inicio||'12:00').slice(0,5),
+      intervaloFim: (row.jornada_intervalo_fim||'13:00').slice(0,5),
+      saida: (row.jornada_saida||'18:00').slice(0,5)
+    }
+  };
 }
-seedDatabase();
+function mapRecordFromDB(row){
+  return { id: row.id, employeeId: row.employee_id, date: row.data, tipo: row.tipo, hora: (row.hora||'').slice(0,5), registradoPor: row.registrado_por };
+}
+function mapCorrectionFromDB(row){
+  return { id: row.id, employeeId: row.employee_id, data: row.data, horario: (row.horario_solicitado||'').slice(0,5), motivo: row.motivo, status: row.status };
+}
+function mapSettingsFromDB(row){
+  return { empresa: row.empresa||'', toleranciaAtraso: row.tolerancia_atraso_min??5, percentualExtra: row.percentual_extra??50, percentualExtraFeriado: row.percentual_extra_feriado??100, cargaMensalPadrao: row.carga_mensal_padrao??220, _id: row.id };
+}
 
-function logAudit(acao){
-  const audit = dbGet('audit');
-  audit.unshift({data:new Date().toISOString(), usuario:currentUser?currentUser.nome:'Sistema', acao});
-  dbSet('audit', audit);
+/* Carrega todas as tabelas do Supabase para o estado local */
+async function carregarTudo(){
+  const [empRes, recRes, holRes, setRes, corRes, audRes, cloRes, usrRes] = await Promise.all([
+    sb.from('employees').select('*').order('nome'),
+    sb.from('time_records').select('*'),
+    sb.from('holidays').select('*'),
+    sb.from('settings').select('*').limit(1).maybeSingle(),
+    sb.from('corrections').select('*'),
+    sb.from('audit_log').select('*').order('created_at', {ascending:false}),
+    sb.from('closures').select('*'),
+    sb.from('profiles').select('*, employees(nome)'),
+  ]);
+  state.employees = (empRes.data||[]).map(mapEmployeeFromDB);
+  state.records = (recRes.data||[]).map(mapRecordFromDB);
+  state.holidays = (holRes.data||[]).map(h=>({data:h.data, nome:h.nome, _id:h.id}));
+  state.settings = setRes.data ? mapSettingsFromDB(setRes.data) : {empresa:'',toleranciaAtraso:5,percentualExtra:50,percentualExtraFeriado:100,cargaMensalPadrao:220};
+  state.corrections = (corRes.data||[]).map(mapCorrectionFromDB);
+  state.audit = (audRes.data||[]).map(a=>({data:a.created_at, usuario:a.usuario_nome, acao:a.acao}));
+  state.closures = (cloRes.data||[]).map(c=>({employeeId:c.employee_id, ano:c.ano, mes:c.mes, fechadoPor:c.fechado_por, data:c.fechado_em}));
+  state.usuarios = (usrRes.data||[]).map(u=>({id:u.id, nome:u.nome, role:u.role, employeeId:u.employee_id, employeeNome:u.employees?u.employees.nome:null}));
+}
+
+async function logAudit(acao){
+  const usuario_nome = currentUser?currentUser.nome:'Sistema';
+  const { data, error } = await sb.from('audit_log').insert({usuario_nome, acao}).select().single();
+  if(!error && data) state.audit.unshift({data:data.created_at, usuario:usuario_nome, acao});
 }
 
 function horaParaMin(hhmm){
@@ -221,37 +244,53 @@ function proximoTipo(regsDoDia){
 
 let currentUser = null;
 
-function fazerLogin(){
-  const u = document.getElementById('loginUser').value.trim();
-  const p = document.getElementById('loginPass').value;
-  const users = dbGet('users');
-  const found = users.find(x=>x.username===u && x.password===p);
-  if(!found){ document.getElementById('loginErro').textContent='Usuário ou senha inválidos.'; return; }
-  currentUser = found;
-  sessionStorage.setItem('rp_session', JSON.stringify(found));
-  document.getElementById('loginErro').textContent='';
+async function carregarPerfil(userId){
+  const { data, error } = await sb.from('profiles').select('*').eq('id', userId).single();
+  if(error || !data) return null;
+  return { id: data.id, nome: data.nome, role: data.role, employeeId: data.employee_id };
+}
+
+async function fazerLogin(){
+  const email = document.getElementById('loginUser').value.trim();
+  const senha = document.getElementById('loginPass').value;
+  document.getElementById('loginErro').textContent = '';
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: senha });
+  if(error){ document.getElementById('loginErro').textContent = 'E-mail ou senha inválidos.'; return; }
+  const perfil = await carregarPerfil(data.user.id);
+  if(!perfil){
+    document.getElementById('loginErro').textContent = 'Login ok, mas não há perfil cadastrado para este usuário na tabela "profiles".';
+    await sb.auth.signOut();
+    return;
+  }
+  currentUser = perfil;
+  document.getElementById('loginErro').textContent = 'Carregando...';
+  await carregarTudo();
   entrarNoApp();
 }
-function fazerLogout(){
-  sessionStorage.removeItem('rp_session');
+async function fazerLogout(){
+  await sb.auth.signOut();
   currentUser = null;
   document.getElementById('appScreen').style.display='none';
   document.getElementById('loginScreen').style.display='flex';
   document.getElementById('loginUser').value='';
   document.getElementById('loginPass').value='';
 }
-function verificarSessao(){
-  try{
-    const s = JSON.parse(sessionStorage.getItem('rp_session'));
-    if(s){ currentUser = s; entrarNoApp(); }
-  }catch(e){}
+async function verificarSessao(){
+  const { data } = await sb.auth.getSession();
+  if(!data.session) return;
+  const perfil = await carregarPerfil(data.session.user.id);
+  if(!perfil) return;
+  currentUser = perfil;
+  await carregarTudo();
+  entrarNoApp();
 }
 
 const MENUS = {
   admin:[['dashboard','📊 Dashboard'],['ponto','🕐 Registrar Ponto'],['colaboradores','👥 Colaboradores'],
     ['espelho','📋 Espelho de Ponto'],['horasextras','⏱ Horas Extras'],['bancohoras','🏦 Banco de Horas'],
     ['atrasos','⚠️ Atrasos e Faltas'],['folha','💰 Folha'],['relatorios','📁 Relatórios'],
-    ['feriados','📅 Feriados'],['correcoes','✏️ Correções'],['auditoria','🔍 Auditoria'],['config','⚙️ Configurações']],
+    ['feriados','📅 Feriados'],['correcoes','✏️ Correções'],['usuarios','👤 Usuários e Acessos'],
+    ['auditoria','🔍 Auditoria'],['config','⚙️ Configurações']],
   rh:[['dashboard','📊 Dashboard'],['ponto','🕐 Registrar Ponto'],['colaboradores','👥 Colaboradores'],
     ['espelho','📋 Espelho de Ponto'],['horasextras','⏱ Horas Extras'],['bancohoras','🏦 Banco de Horas'],
     ['atrasos','⚠️ Atrasos e Faltas'],['folha','💰 Folha'],['relatorios','📁 Relatórios'],
@@ -286,7 +325,7 @@ function navegar(view){
     dashboard: renderDashboard, ponto: renderPonto, colaboradores: renderColaboradores,
     espelho: renderEspelho, horasextras: renderHorasExtras, bancohoras: renderBancoHoras,
     atrasos: renderAtrasos, folha: renderFolha, relatorios: renderRelatorios,
-    feriados: renderFeriados, correcoes: renderCorrecoes, auditoria: renderAuditoria, config: renderConfig
+    feriados: renderFeriados, correcoes: renderCorrecoes, auditoria: renderAuditoria, config: renderConfig, usuarios: renderUsuarios
   };
   (renderers[view] || renderDashboard)();
 }
@@ -352,8 +391,9 @@ function renderDashboard(){
 }
 
 function renderPonto(){
+  if(currentUser.role!=='funcionario' && !pontoFuncSelecionado){ pontoFuncSelecionado = (dbGet('employees')[0]||{}).id; }
   const func = currentUser.role==='funcionario' ? meuFuncionario() : (dbGet('employees')[0]||null);
-  if(!func){ document.getElementById('content').innerHTML = '<h1>Registrar Ponto</h1><p>Nenhum colaborador vinculado a este usuário.</p>'; return; }
+  if(!func){ document.getElementById('content').innerHTML = '<h1>Registrar Ponto</h1><p>Nenhum colaborador cadastrado ainda. Peça a um administrador para cadastrar em "Colaboradores".</p>'; return; }
 
   const empregadosSelect = currentUser.role!=='funcionario' ? `
     <div style="max-width:300px;margin:0 auto 20px">
@@ -399,7 +439,7 @@ function renderPonto(){
   `;
   atualizarRelogioPonto();
 }
-let pontoFuncSelecionado = (dbGet('employees')[0]||{}).id;
+let pontoFuncSelecionado = null;
 function atualizarRelogioPonto(){
   const el = document.getElementById('relogioPonto'); if(!el) return;
   const agora = new Date();
@@ -408,11 +448,14 @@ function atualizarRelogioPonto(){
 }
 setInterval(()=>{ if(viewAtual==='ponto') atualizarRelogioPonto(); }, 1000);
 
-function registrarPonto(employeeId, tipo){
-  const records = dbGet('records');
-  records.push({id:uid(), employeeId, date:hojeISO(), tipo, hora:horaAgora(), registradoPor:currentUser.nome, timestamp:Date.now()});
-  dbSet('records', records);
-  logAudit(`Registro de ponto: ${tipo} para ${dbGet('employees').find(e=>e.id===employeeId)?.nome} às ${horaAgora()}`);
+async function registrarPonto(employeeId, tipo){
+  const hora = horaAgora();
+  const { data, error } = await sb.from('time_records')
+    .insert({employee_id: employeeId, data: hojeISO(), tipo, hora, registrado_por: currentUser.nome})
+    .select().single();
+  if(error){ alert('Erro ao registrar ponto: '+error.message); return; }
+  state.records.push(mapRecordFromDB(data));
+  logAudit(`Registro de ponto: ${tipo} para ${dbGet('employees').find(e=>e.id===employeeId)?.nome} às ${hora}`);
   renderPonto();
 }
 
@@ -437,12 +480,13 @@ function renderColaboradores(){
     </div>
   `;
 }
-function excluirColaborador(id){
+async function excluirColaborador(id){
   if(!confirm('Inativar este colaborador?')) return;
-  const emp = dbGet('employees');
-  const alvo = emp.find(e=>e.id===id); alvo.status='Inativo';
-  dbSet('employees', emp);
-  logAudit(`Colaborador inativado: ${alvo.nome}`);
+  const { data, error } = await sb.from('employees').update({status:'Inativo'}).eq('id', id).select().single();
+  if(error){ alert('Erro ao inativar: '+error.message); return; }
+  const idx = state.employees.findIndex(e=>e.id===id);
+  if(idx>-1) state.employees[idx] = mapEmployeeFromDB(data);
+  logAudit(`Colaborador inativado: ${data.nome}`);
   renderColaboradores();
 }
 function abrirModalColaborador(id){
@@ -473,23 +517,27 @@ function abrirModalColaborador(id){
   `;
   abrirModal();
 }
-function salvarColaborador(id){
-  const emp = dbGet('employees');
-  const dados = {
-    nome:val('fNome'), cpf:val('fCpf'), matricula:val('fMat'), cargo:val('fCargo'), setor:val('fSetor'),
-    salario:parseFloat(val('fSalario'))||0, cargaMensal:parseInt(val('fCarga'))||220, admissao:val('fAdmissao'),
-    status:val('fStatus'),
-    jornada:{entrada:val('fEntrada'),saida:val('fSaida'),intervaloInicio:val('fInt1'),intervaloFim:val('fInt2')}
+async function salvarColaborador(id){
+  const nome = val('fNome');
+  const dbRow = {
+    nome, cpf:val('fCpf'), matricula:val('fMat'), cargo:val('fCargo'), setor:val('fSetor'),
+    salario:parseFloat(val('fSalario'))||0, carga_horaria_mensal:parseInt(val('fCarga'))||220,
+    data_admissao: val('fAdmissao') || null, status:val('fStatus'),
+    jornada_entrada:val('fEntrada'), jornada_saida:val('fSaida'),
+    jornada_intervalo_inicio:val('fInt1'), jornada_intervalo_fim:val('fInt2')
   };
   if(id){
-    const idx = emp.findIndex(e=>e.id===id);
-    emp[idx] = {...emp[idx], ...dados};
-    logAudit(`Colaborador editado: ${dados.nome}`);
+    const { data, error } = await sb.from('employees').update(dbRow).eq('id', id).select().single();
+    if(error){ alert('Erro ao salvar: '+error.message); return; }
+    const idx = state.employees.findIndex(e=>e.id===id);
+    state.employees[idx] = mapEmployeeFromDB(data);
+    logAudit(`Colaborador editado: ${nome}`);
   } else {
-    emp.push({id:uid(), ...dados});
-    logAudit(`Colaborador cadastrado: ${dados.nome}`);
+    const { data, error } = await sb.from('employees').insert(dbRow).select().single();
+    if(error){ alert('Erro ao salvar: '+error.message); return; }
+    state.employees.push(mapEmployeeFromDB(data));
+    logAudit(`Colaborador cadastrado: ${nome}`);
   }
-  dbSet('employees', emp);
   fecharModal();
   renderColaboradores();
 }
@@ -694,71 +742,202 @@ function renderFolha(){
   `;
 }
 let folhaMes=null, folhaAno=null;
-function fecharFolha(employeeId, ano, mes){
+async function fecharFolha(employeeId, ano, mes){
   if(!confirm('Confirmar fechamento da folha deste colaborador para o período? Isso bloqueará novas alterações retroativas.')) return;
-  const closures = dbGet('closures');
   const func = dbGet('employees').find(e=>e.id===employeeId);
-  const resumo = calcularResumoMensal(func, ano, mes);
-  closures.push({id:uid(), employeeId, ano, mes, fechadoPor:currentUser.nome, data:new Date().toISOString(), resumo});
-  dbSet('closures', closures);
+  const { data, error } = await sb.from('closures')
+    .insert({employee_id: employeeId, ano, mes, fechado_por: currentUser.nome})
+    .select().single();
+  if(error){ alert('Erro ao fechar folha: '+error.message); return; }
+  state.closures.push({employeeId:data.employee_id, ano:data.ano, mes:data.mes, fechadoPor:data.fechado_por, data:data.fechado_em});
   logAudit(`Folha fechada: ${func.nome} - ${nomeMes(mes)}/${ano}`);
   renderFolha();
 }
-function reabrirFolha(employeeId, ano, mes){
+async function reabrirFolha(employeeId, ano, mes){
   if(!confirm('Reabrir esta folha? (somente administrador)')) return;
-  let closures = dbGet('closures');
-  const alvo = closures.find(c=>c.employeeId===employeeId && c.ano===ano && c.mes===mes);
-  closures = closures.filter(c=>c!==alvo);
-  dbSet('closures', closures);
+  const { error } = await sb.from('closures').delete().eq('employee_id', employeeId).eq('ano', ano).eq('mes', mes);
+  if(error){ alert('Erro ao reabrir: '+error.message); return; }
+  state.closures = state.closures.filter(c=>!(c.employeeId===employeeId && c.ano===ano && c.mes===mes));
   const func = dbGet('employees').find(e=>e.id===employeeId);
   logAudit(`Folha reaberta: ${func.nome} - ${nomeMes(mes)}/${ano} (por ${currentUser.nome})`);
   renderFolha();
 }
 
 function renderRelatorios(){
+  const emp = dbGet('employees');
+  const hoje = new Date();
+  const mes = relMes ?? hoje.getMonth();
+  const ano = relAno ?? hoje.getFullYear();
+  const tipo = relTipo || 'ponto';
+  const funcId = relFuncId || 'todos';
+
   document.getElementById('content').innerHTML = `
     <h1>Relatórios</h1>
     <div class="card">
-      <p>Exporte os dados abaixo em formato CSV (compatível com Excel).</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-azul" onclick="exportarCSVRegistros()">📁 Relatório de Ponto (todas as marcações)</button>
-        <button class="btn btn-azul" onclick="exportarCSVResumo()">📁 Relatório de Horas Trabalhadas / Extras (mês atual)</button>
-        <button class="btn btn-azul" onclick="exportarCSVColaboradores()">📁 Relatório de Colaboradores</button>
+      <div class="filtros">
+        <div>
+          <label>Colaborador</label>
+          <select id="relFiltroFunc" onchange="relFuncId=this.value; renderRelatorios()">
+            <option value="todos" ${funcId==='todos'?'selected':''}>Todos os colaboradores</option>
+            ${emp.map(e=>`<option value="${e.id}" ${e.id===funcId?'selected':''}>${e.nome}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Tipo de Relatório</label>
+          <select id="relFiltroTipo" onchange="relTipo=this.value; renderRelatorios()">
+            <option value="ponto" ${tipo==='ponto'?'selected':''}>Marcação de Ponto</option>
+            <option value="extras" ${tipo==='extras'?'selected':''}>Horas Extras</option>
+            <option value="folha" ${tipo==='folha'?'selected':''}>Fechamento de Folha para Pagamento</option>
+          </select>
+        </div>
+        <div>
+          <label>Mês</label>
+          <select id="relFiltroMes" onchange="relMes=parseInt(this.value); renderRelatorios()">
+            ${[...Array(12).keys()].map(m=>`<option value="${m}" ${m===mes?'selected':''}>${nomeMes(m)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Ano</label>
+          <input type="number" value="${ano}" onchange="relAno=parseInt(this.value); renderRelatorios()">
+        </div>
+        <div>
+          <button class="btn btn-azul" onclick="exportarRelatorioAtual()">📁 Exportar CSV</button>
+        </div>
       </div>
     </div>
+    <div id="relatorioResultado"></div>
   `;
+  renderResultadoRelatorio(tipo, funcId, ano, mes);
 }
+let relFuncId=null, relTipo=null, relMes=null, relAno=null;
+
+function funcionariosDoRelatorio(funcId){
+  const emp = dbGet('employees');
+  return funcId==='todos' ? emp.filter(e=>e.status==='Ativo') : emp.filter(e=>e.id===funcId);
+}
+
+function renderResultadoRelatorio(tipo, funcId, ano, mes){
+  const alvo = document.getElementById('relatorioResultado');
+  const funcs = funcionariosDoRelatorio(funcId);
+
+  if(tipo==='ponto'){
+    const records = dbGet('records').filter(r=>{
+      const [ry,rm] = r.date.split('-').map(Number);
+      return ry===ano && (rm-1)===mes && funcs.some(f=>f.id===r.employeeId);
+    }).sort((a,b)=> a.date===b.date ? a.hora.localeCompare(b.hora) : a.date.localeCompare(b.date));
+    alvo.innerHTML = `
+      <div class="card">
+        <h3 style="margin-top:0">Marcação de Ponto — ${nomeMes(mes)}/${ano}</h3>
+        <table>
+          <thead><tr><th>Colaborador</th><th>Data</th><th>Tipo</th><th>Hora</th><th>Registrado por</th></tr></thead>
+          <tbody>${records.map(r=>{
+            const f = dbGet('employees').find(e=>e.id===r.employeeId);
+            return `<tr><td>${f?f.nome:'?'}</td><td>${formatDataBR(r.date)}</td><td>${r.tipo}</td><td>${r.hora}</td><td>${r.registradoPor||''}</td></tr>`;
+          }).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhuma marcação encontrada para este período.</td></tr>'}</tbody>
+        </table>
+      </div>`;
+  }
+
+  if(tipo==='extras'){
+    let totalExtraMin=0, totalValor=0;
+    const linhas = funcs.map(f=>{
+      const r = calcularResumoMensal(f, ano, mes);
+      totalExtraMin += r.extraMin; totalValor += r.valorExtra;
+      return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td>${formatBRL(r.valorHora)}</td>
+        <td>${dbGet('settings').percentualExtra}%</td><td>${formatBRL(r.valorExtra)}</td></tr>`;
+    }).join('');
+    alvo.innerHTML = `
+      <div class="grid-cards">
+        <div class="stat-card"><div class="num">${minParaHora(totalExtraMin)}</div><div class="label">Total de horas extras</div></div>
+        <div class="stat-card"><div class="num">${formatBRL(totalValor)}</div><div class="label">Total a pagar em extras</div></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Horas Extras — ${nomeMes(mes)}/${ano}</h3>
+        <table>
+          <thead><tr><th>Colaborador</th><th>Horas Extras</th><th>Valor Hora</th><th>% Aplicado</th><th>Valor Total</th></tr></thead>
+          <tbody>${linhas || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}</tbody>
+        </table>
+      </div>`;
+  }
+
+  if(tipo==='folha'){
+    const closures = dbGet('closures');
+    let totalBruto=0;
+    const linhas = funcs.map(f=>{
+      const r = calcularResumoMensal(f, ano, mes);
+      const fechada = closures.find(c=>c.employeeId===f.id && c.ano===ano && c.mes===mes);
+      const bruto = f.salario + r.valorExtra;
+      totalBruto += bruto;
+      return `<tr>
+        <td>${f.nome}</td><td>${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
+        <td>${minParaHora(r.extraMin)}</td><td>${formatBRL(r.valorExtra)}</td>
+        <td>${minParaHora(r.atrasoMin)}</td><td>${r.faltas}</td>
+        <td><b>${formatBRL(bruto)}</b></td>
+        <td>${fechada?'<span class="badge badge-verde">Fechada</span>':'<span class="badge badge-amarelo">Aberta</span>'}</td>
+      </tr>`;
+    }).join('');
+    alvo.innerHTML = `
+      <div class="aviso">⚠️ Valores calculados a partir dos registros de ponto — use como apoio ao fechamento oficial da folha, conforme sua política e orientação contábil.</div>
+      <div class="grid-cards">
+        <div class="stat-card"><div class="num">${formatBRL(totalBruto)}</div><div class="label">Total geral a pagar</div></div>
+        <div class="stat-card"><div class="num">${funcs.length}</div><div class="label">Colaboradores no relatório</div></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Fechamento de Folha para Pagamento — ${nomeMes(mes)}/${ano}</h3>
+        <table>
+          <thead><tr><th>Colaborador</th><th>Salário Base</th><th>Horas Trab.</th><th>Extras</th><th>Valor Extra</th><th>Atrasos</th><th>Faltas</th><th>Total a Pagar</th><th>Status</th></tr></thead>
+          <tbody>${linhas || '<tr><td colspan="9" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}</tbody>
+        </table>
+      </div>`;
+  }
+}
+
 function baixarCSV(nomeArq, linhas){
   const csv = linhas.map(l=>l.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\n');
   const blob = new Blob(["\uFEFF"+csv], {type:'text/csv;charset=utf-8;'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = nomeArq; a.click();
 }
-function exportarCSVRegistros(){
-  const emp = dbGet('employees');
-  const records = dbGet('records');
-  const linhas = [['Colaborador','Data','Tipo','Hora','Registrado por']];
-  records.forEach(r=>{
-    const f = emp.find(e=>e.id===r.employeeId);
-    linhas.push([f?f.nome:'?', formatDataBR(r.date), r.tipo, r.hora, r.registradoPor||'']);
-  });
-  baixarCSV('relatorio_ponto.csv', linhas);
-}
-function exportarCSVResumo(){
-  const emp = dbGet('employees').filter(e=>e.status==='Ativo');
+
+function exportarRelatorioAtual(){
   const hoje = new Date();
-  const linhas = [['Colaborador','Horas Trabalhadas','Horas Previstas','Horas Extras','Atrasos','Faltas','Valor Extra (R$)']];
-  emp.forEach(f=>{
-    const r = calcularResumoMensal(f, hoje.getFullYear(), hoje.getMonth());
-    linhas.push([f.nome, minParaHora(r.trabalhadoMin), minParaHora(r.previstoMin), minParaHora(r.extraMin), minParaHora(r.atrasoMin), r.faltas, r.valorExtra.toFixed(2)]);
-  });
-  baixarCSV('relatorio_horas.csv', linhas);
-}
-function exportarCSVColaboradores(){
-  const emp = dbGet('employees');
-  const linhas = [['Nome','CPF','Matrícula','Cargo','Setor','Salário','Status','Admissão']];
-  emp.forEach(e=>linhas.push([e.nome,e.cpf,e.matricula,e.cargo,e.setor,e.salario,e.status,formatDataBR(e.admissao)]));
-  baixarCSV('colaboradores.csv', linhas);
+  const mes = relMes ?? hoje.getMonth();
+  const ano = relAno ?? hoje.getFullYear();
+  const tipo = relTipo || 'ponto';
+  const funcId = relFuncId || 'todos';
+  const funcs = funcionariosDoRelatorio(funcId);
+
+  if(tipo==='ponto'){
+    const records = dbGet('records').filter(r=>{
+      const [ry,rm] = r.date.split('-').map(Number);
+      return ry===ano && (rm-1)===mes && funcs.some(f=>f.id===r.employeeId);
+    });
+    const linhas = [['Colaborador','Data','Tipo','Hora','Registrado por']];
+    records.forEach(r=>{
+      const f = dbGet('employees').find(e=>e.id===r.employeeId);
+      linhas.push([f?f.nome:'?', formatDataBR(r.date), r.tipo, r.hora, r.registradoPor||'']);
+    });
+    baixarCSV(`marcacao_ponto_${nomeMes(mes)}_${ano}.csv`, linhas);
+  }
+
+  if(tipo==='extras'){
+    const linhas = [['Colaborador','Horas Extras','Valor Hora','% Aplicado','Valor Total (R$)']];
+    funcs.forEach(f=>{
+      const r = calcularResumoMensal(f, ano, mes);
+      linhas.push([f.nome, minParaHora(r.extraMin), r.valorHora.toFixed(2), dbGet('settings').percentualExtra, r.valorExtra.toFixed(2)]);
+    });
+    baixarCSV(`horas_extras_${nomeMes(mes)}_${ano}.csv`, linhas);
+  }
+
+  if(tipo==='folha'){
+    const linhas = [['Colaborador','Salário Base','Horas Trabalhadas','Horas Extras','Valor Extra (R$)','Atrasos','Faltas','Total a Pagar (R$)']];
+    funcs.forEach(f=>{
+      const r = calcularResumoMensal(f, ano, mes);
+      const bruto = f.salario + r.valorExtra;
+      linhas.push([f.nome, f.salario.toFixed(2), minParaHora(r.trabalhadoMin), minParaHora(r.extraMin), r.valorExtra.toFixed(2), minParaHora(r.atrasoMin), r.faltas, bruto.toFixed(2)]);
+    });
+    baixarCSV(`fechamento_folha_${nomeMes(mes)}_${ano}.csv`, linhas);
+  }
 }
 
 function renderFeriados(){
@@ -782,17 +961,22 @@ function renderFeriados(){
     </div>
   `;
 }
-function adicionarFeriado(){
+async function adicionarFeriado(){
   const data = val('novoFerData'), nome = val('novoFerNome');
   if(!data || !nome){ alert('Preencha data e nome do feriado.'); return; }
-  const holidays = dbGet('holidays');
-  holidays.push({data, nome});
-  dbSet('holidays', holidays);
+  const { data: row, error } = await sb.from('holidays').insert({data, nome}).select().single();
+  if(error){ alert('Erro ao salvar feriado: '+error.message); return; }
+  state.holidays.push({data:row.data, nome:row.nome, _id:row.id});
   logAudit(`Feriado cadastrado: ${nome} (${formatDataBR(data)})`);
   renderFeriados();
 }
-function removerFeriado(data){
-  dbSet('holidays', dbGet('holidays').filter(h=>h.data!==data));
+async function removerFeriado(dataISO){
+  const h = state.holidays.find(x=>x.data===dataISO);
+  if(h && h._id){
+    const { error } = await sb.from('holidays').delete().eq('id', h._id);
+    if(error){ alert('Erro ao excluir: '+error.message); return; }
+  }
+  state.holidays = state.holidays.filter(x=>x.data!==dataISO);
   renderFeriados();
 }
 
@@ -831,17 +1015,19 @@ function renderCorrecoes(){
     </div>
   `;
 }
-function solicitarCorrecao(){
-  const corrections = dbGet('corrections');
-  corrections.push({id:uid(), employeeId:currentUser.employeeId, data:val('corData'), horario:val('corHora'), motivo:val('corMotivo'), status:'Pendente'});
-  dbSet('corrections', corrections);
+async function solicitarCorrecao(){
+  const row = { employee_id: currentUser.employeeId, data: val('corData'), horario_solicitado: val('corHora'), motivo: val('corMotivo'), status:'Pendente' };
+  const { data, error } = await sb.from('corrections').insert(row).select().single();
+  if(error){ alert('Erro ao enviar solicitação: '+error.message); return; }
+  state.corrections.push(mapCorrectionFromDB(data));
   logAudit(`Solicitação de correção enviada por ${currentUser.nome}`);
   renderCorrecoes();
 }
-function responderCorrecao(id, status){
-  const corrections = dbGet('corrections');
-  const c = corrections.find(x=>x.id===id); c.status = status;
-  dbSet('corrections', corrections);
+async function responderCorrecao(id, status){
+  const { data, error } = await sb.from('corrections').update({status}).eq('id', id).select().single();
+  if(error){ alert('Erro: '+error.message); return; }
+  const idx = state.corrections.findIndex(c=>c.id===id);
+  if(idx>-1) state.corrections[idx] = mapCorrectionFromDB(data);
   logAudit(`Correção ${status.toLowerCase()} por ${currentUser.nome}`);
   renderCorrecoes();
 }
@@ -860,6 +1046,76 @@ function renderAuditoria(){
   `;
 }
 
+/* ======================================================================
+   USUÁRIOS E ACESSOS (criar login + senha direto pelo app)
+   ====================================================================== */
+function renderUsuarios(){
+  const usuarios = dbGet('usuarios');
+  const emp = dbGet('employees');
+  document.getElementById('content').innerHTML = `
+    <h1>Usuários e Acessos</h1>
+    <div class="card">
+      <h3 style="margin-top:0">Criar novo usuário</h3>
+      <div class="form-grid">
+        <div><label>Nome de exibição</label><input id="novoUserNome" placeholder="ex: João da Silva"></div>
+        <div><label>Perfil de acesso</label>
+          <select id="novoUserRole" onchange="document.getElementById('blocoFuncVinculado').style.display=(this.value==='admin'?'none':'block')">
+            <option value="funcionario">Funcionário</option>
+            <option value="rh">RH / Gestor</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </div>
+        <div><label>E-mail de login</label><input id="novoUserEmail" type="email" placeholder="usuario@empresa.com"></div>
+        <div><label>Senha provisória</label><input id="novoUserSenha" type="text" placeholder="mínimo 6 caracteres"></div>
+        <div class="full" id="blocoFuncVinculado">
+          <label>Vincular a qual colaborador?</label>
+          <select id="novoUserFunc">
+            <option value="">-- selecione --</option>
+            ${emp.map(e=>`<option value="${e.id}">${e.nome}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-azul" style="margin-top:14px" onclick="criarUsuario()">+ Criar Usuário</button>
+      <div class="aviso" style="margin-top:14px">⚠️ Depois de criar, avise o colaborador da senha provisória. Se o login não funcionar de primeira, veja em <b>Authentication &gt; Providers &gt; Email</b> no Supabase se a opção "Confirm email" está desativada (para não exigir confirmação por e-mail).</div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Usuários cadastrados</h3>
+      <table>
+        <thead><tr><th>Nome</th><th>Perfil</th><th>Colaborador vinculado</th></tr></thead>
+        <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome||'-'}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function criarUsuario(){
+  const nome = val('novoUserNome');
+  const role = val('novoUserRole');
+  const email = val('novoUserEmail');
+  const senha = val('novoUserSenha');
+  const employeeId = val('novoUserFunc') || null;
+
+  if(!nome || !email || !senha){ alert('Preencha nome, e-mail e senha.'); return; }
+  if(senha.length < 6){ alert('A senha precisa ter pelo menos 6 caracteres.'); return; }
+  if(role!=='admin' && !employeeId){ alert('Selecione o colaborador vinculado a este usuário.'); return; }
+
+  // Cliente temporário (não guarda sessão) para criar o login sem derrubar o admin logado
+  const clienteTemp = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth:{ persistSession:false, autoRefreshToken:false } });
+  const { data, error } = await clienteTemp.auth.signUp({ email, password: senha });
+  if(error){ alert('Erro ao criar login: '+error.message); return; }
+  const novoId = data.user ? data.user.id : null;
+  if(!novoId){ alert('Não foi possível criar o login (talvez esse e-mail já exista).'); return; }
+
+  const { error: erroPerfil } = await sb.from('profiles').insert({ id:novoId, nome, role, employee_id: employeeId });
+  if(erroPerfil){ alert('O login foi criado, mas houve erro ao salvar o perfil: '+erroPerfil.message); return; }
+
+  const emp = dbGet('employees').find(e=>e.id===employeeId);
+  state.usuarios.push({id:novoId, nome, role, employeeId, employeeNome: emp?emp.nome:null});
+  logAudit(`Novo usuário criado: ${nome} (${email}) — perfil ${rotuloPerfil(role)}`);
+  alert('Usuário criado com sucesso! Já pode ser usado para login.');
+  renderUsuarios();
+}
+
 function renderConfig(){
   const s = dbGet('settings');
   document.getElementById('content').innerHTML = `
@@ -874,13 +1130,19 @@ function renderConfig(){
     </div>
   `;
 }
-function salvarConfig(){
+async function salvarConfig(){
   const s = {
-    empresa:val('cfgEmpresa'), toleranciaAtraso:parseInt(val('cfgTolerancia'))||0,
-    percentualExtra:parseFloat(val('cfgExtra'))||50, percentualExtraFeriado:parseFloat(val('cfgExtraFer'))||100,
-    cargaMensalPadrao:parseInt(val('cfgCarga'))||220
+    empresa:val('cfgEmpresa'), tolerancia_atraso_min:parseInt(val('cfgTolerancia'))||0,
+    percentual_extra:parseFloat(val('cfgExtra'))||50, percentual_extra_feriado:parseFloat(val('cfgExtraFer'))||100,
+    carga_mensal_padrao:parseInt(val('cfgCarga'))||220
   };
-  dbSet('settings', s);
+  const existeId = state.settings._id;
+  const query = existeId
+    ? sb.from('settings').update(s).eq('id', existeId).select().single()
+    : sb.from('settings').insert(s).select().single();
+  const { data, error } = await query;
+  if(error){ alert('Erro ao salvar configurações: '+error.message); return; }
+  state.settings = mapSettingsFromDB(data);
   logAudit('Configurações do sistema atualizadas');
   alert('Configurações salvas.');
   renderConfig();
@@ -892,6 +1154,7 @@ document.getElementById('modalBg').addEventListener('click', e=>{ if(e.target.id
 
 document.getElementById('loginPass').addEventListener('keydown', e=>{ if(e.key==='Enter') fazerLogin(); });
 verificarSessao();
+
 </script>
 </body>
 </html>
