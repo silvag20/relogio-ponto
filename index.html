@@ -631,6 +631,7 @@ function renderEspelho(){
     }
     totalTrab += trabMin; totalPrev += prevMin; totalExtra += extraMin; totalAtraso += atrasoMin;
     if(regsDia.length===0 && prevMin===0) continue;
+    const podeEditar = currentUser.role==='admin' || currentUser.role==='rh';
     linhas += `<tr>
       <td>${String(d).padStart(2,'0')}/${String(mes+1).padStart(2,'0')} ${isHoliday?'<span class="badge badge-amarelo">Feriado</span>':''}</td>
       <td>${tipos['Entrada']||'-'}</td><td>${tipos['Saída Intervalo']||'-'}</td>
@@ -638,8 +639,10 @@ function renderEspelho(){
       <td>${minParaHora(trabMin)}</td><td>${minParaHora(prevMin)}</td>
       <td style="color:var(--verde)">${extraMin>0?minParaHora(extraMin):'-'}</td>
       <td style="color:var(--vermelho)">${atrasoMin>0?minParaHora(atrasoMin):'-'}</td>
+      ${podeEditar?`<td><button class="icon-btn" onclick="abrirModalEdicaoPonto('${func.id}','${dataISO}')">✏️ Editar</button></td>`:''}
     </tr>`;
   }
+  const podeEditarCab = currentUser.role==='admin' || currentUser.role==='rh';
   document.getElementById('espelhoTabela').innerHTML = `
     <div class="grid-cards">
       <div class="stat-card"><div class="num">${minParaHora(totalTrab)}</div><div class="label">Total trabalhado</div></div>
@@ -647,13 +650,80 @@ function renderEspelho(){
       <div class="stat-card"><div class="num" style="color:var(--verde)">${minParaHora(totalExtra)}</div><div class="label">Horas extras</div></div>
       <div class="stat-card"><div class="num" style="color:var(--vermelho)">${minParaHora(totalAtraso)}</div><div class="label">Atrasos</div></div>
     </div>
-    <div class="card">
+    <div class="card" style="overflow-x:auto">
       <table>
-        <thead><tr><th>Data</th><th>Entrada</th><th>Saída Int.</th><th>Retorno</th><th>Saída</th><th>Trabalhado</th><th>Previsto</th><th>Extra</th><th>Atraso</th></tr></thead>
-        <tbody>${linhas || '<tr><td colspan="9" style="color:var(--cinza)">Nenhum registro neste mês.</td></tr>'}</tbody>
+        <thead><tr><th>Data</th><th>Entrada</th><th>Saída Int.</th><th>Retorno</th><th>Saída</th><th>Trabalhado</th><th>Previsto</th><th>Extra</th><th>Atraso</th>${podeEditarCab?'<th>Ações</th>':''}</tr></thead>
+        <tbody>${linhas || `<tr><td colspan="${podeEditarCab?10:9}" style="color:var(--cinza)">Nenhum registro neste mês.</td></tr>`}</tbody>
       </table>
     </div>
   `;
+}
+
+/* Edição manual de marcações de ponto (correção de lançamentos indevidos) */
+function abrirModalEdicaoPonto(employeeId, dataISO){
+  const func = dbGet('employees').find(e=>e.id===employeeId);
+  const regsDia = dbGet('records').filter(r=>r.employeeId===employeeId && r.date===dataISO);
+  const tipos = {}; regsDia.forEach(r=>tipos[r.tipo]=r.hora);
+  const [ano,mes,dia] = dataISO.split('-');
+  document.getElementById('modalBox').innerHTML = `
+    <h2>Editar Marcações de Ponto</h2>
+    <p style="color:var(--cinza);font-size:0.9rem;margin-top:-8px">${func?func.nome:''} — ${dia}/${mes}/${ano}</p>
+    <div class="aviso" style="margin-top:10px">⚠️ Use este campo apenas para corrigir lançamentos indevidos ou esquecidos. Deixe o horário em branco para remover uma marcação. A alteração fica registrada na auditoria.</div>
+    <div class="form-grid">
+      <div><label>Entrada</label><input id="fpEntrada" type="time" value="${tipos['Entrada']||''}"></div>
+      <div><label>Saída Intervalo</label><input id="fpSaidaInt" type="time" value="${tipos['Saída Intervalo']||''}"></div>
+      <div><label>Retorno</label><input id="fpRetorno" type="time" value="${tipos['Retorno']||''}"></div>
+      <div><label>Saída</label><input id="fpSaida" type="time" value="${tipos['Saída']||''}"></div>
+    </div>
+    <div class="modal-acoes">
+      <button class="btn btn-cinza" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-azul" onclick="salvarEdicaoPonto('${employeeId}','${dataISO}')">Salvar</button>
+    </div>
+  `;
+  abrirModal();
+}
+async function salvarEdicaoPonto(employeeId, dataISO){
+  const func = dbGet('employees').find(e=>e.id===employeeId);
+  const mapaCampos = {
+    'Entrada': val('fpEntrada'),
+    'Saída Intervalo': val('fpSaidaInt'),
+    'Retorno': val('fpRetorno'),
+    'Saída': val('fpSaida')
+  };
+  const regsDia = dbGet('records').filter(r=>r.employeeId===employeeId && r.date===dataISO);
+  const alteracoes = [];
+  for(const tipo of Object.keys(mapaCampos)){
+    const novaHora = mapaCampos[tipo];
+    const existente = regsDia.find(r=>r.tipo===tipo);
+    if(novaHora){
+      if(existente){
+        if(existente.hora !== novaHora){
+          const { data, error } = await sb.from('time_records').update({hora:novaHora, registrado_por: currentUser.nome}).eq('id', existente.id).select().single();
+          if(error){ alert('Erro ao salvar '+tipo+': '+error.message); return; }
+          const idx = state.records.findIndex(r=>r.id===existente.id);
+          state.records[idx] = mapRecordFromDB(data);
+          alteracoes.push(`${tipo} alterado para ${novaHora}`);
+        }
+      } else {
+        const { data, error } = await sb.from('time_records')
+          .insert({employee_id: employeeId, data: dataISO, tipo, hora: novaHora, registrado_por: currentUser.nome})
+          .select().single();
+        if(error){ alert('Erro ao salvar '+tipo+': '+error.message); return; }
+        state.records.push(mapRecordFromDB(data));
+        alteracoes.push(`${tipo} incluído às ${novaHora}`);
+      }
+    } else if(existente){
+      const { error } = await sb.from('time_records').delete().eq('id', existente.id);
+      if(error){ alert('Erro ao remover '+tipo+': '+error.message); return; }
+      state.records = state.records.filter(r=>r.id!==existente.id);
+      alteracoes.push(`${tipo} removido`);
+    }
+  }
+  if(alteracoes.length){
+    logAudit(`Ajuste manual de ponto de ${func?func.nome:employeeId} em ${dataISO}: ${alteracoes.join('; ')}`);
+  }
+  fecharModal();
+  renderEspelho();
 }
 let espelhoFuncId=null, espelhoMes=null, espelhoAno=null;
 
