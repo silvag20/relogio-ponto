@@ -39,8 +39,8 @@
   .badge-amarelo{background:#fef3c7;color:#92400e;}
   .badge-cinza{background:#e2e8f0;color:#475569;}
 
-  #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a8a,#2563eb);}
-  .login-box{background:#fff;padding:40px;border-radius:14px;width:340px;max-width:90vw;box-shadow:0 10px 40px rgba(0,0,0,0.25);}
+  #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(30,58,138,0.88),rgba(37,99,235,0.88)),url('assets/logo-grupo-calissa.png');background-size:cover;background-position:center;background-repeat:no-repeat;background-attachment:fixed;}
+  .login-box{background:rgba(255,255,255,0.97);padding:40px;border-radius:14px;width:340px;max-width:90vw;box-shadow:0 10px 40px rgba(0,0,0,0.35);backdrop-filter:blur(2px);}
   .login-box h1{font-size:1.4rem;text-align:center;margin-bottom:5px;}
   .login-box p{text-align:center;color:var(--cinza);font-size:0.85rem;margin-bottom:20px;}
   .login-box button{width:100%;margin-top:18px;padding:12px;}
@@ -124,7 +124,8 @@
 
 <div id="loginScreen">
   <div class="login-box">
-    <h1>⏰ Relógio de Ponto</h1>
+    <img src="assets/logo-grupo-calissa.png" alt="Grupo Calissa" style="display:block;width:110px;margin:0 auto 12px;">
+    <h1 style="margin-bottom:0">Relógio de Ponto</h1>
     <p>Gestão de Funcionários e Jornada</p>
     <label>E-mail</label>
     <input id="loginUser" type="email" placeholder="seu@email.com">
