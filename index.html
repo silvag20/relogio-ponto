@@ -1219,7 +1219,7 @@ function renderUsuarios(){
       <div class="form-grid">
         <div><label>Nome de exibição</label><input id="novoUserNome" placeholder="ex: João da Silva"></div>
         <div><label>Perfil de acesso</label>
-          <select id="novoUserRole" onchange="document.getElementById('blocoFuncVinculado').style.display=(this.value==='admin'?'none':'block')">
+          <select id="novoUserRole" onchange="atualizarBlocoVinculo()">
             <option value="funcionario">Funcionário</option>
             <option value="rh">RH / Gestor</option>
             <option value="admin">Administrador</option>
@@ -1231,6 +1231,7 @@ function renderUsuarios(){
           <label>Vincular a qual colaborador?</label>
           <select id="novoUserFunc">
             <option value="">-- selecione --</option>
+            <option value="todos">Todos os colaboradores (acesso geral, sem vínculo com um específico)</option>
             ${emp.map(e=>`<option value="${e.id}">${e.nome}</option>`).join('')}
           </select>
         </div>
@@ -1242,10 +1243,23 @@ function renderUsuarios(){
       <h3 style="margin-top:0">Usuários cadastrados</h3>
       <table>
         <thead><tr><th>Nome</th><th>Perfil</th><th>Colaborador vinculado</th></tr></thead>
-        <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome||'-'}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
+        <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome || (u.role==='admin'||u.role==='rh' ? 'Todos (acesso geral)' : '-')}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
       </table>
     </div>
   `;
+}
+
+function atualizarBlocoVinculo(){
+  const role = val('novoUserRole');
+  const bloco = document.getElementById('blocoFuncVinculado');
+  const select = document.getElementById('novoUserFunc');
+  bloco.style.display = (role==='admin' ? 'none' : 'block');
+  const opcaoTodos = select.querySelector('option[value="todos"]');
+  if(opcaoTodos){
+    // "Todos" só faz sentido para RH/Gestor (funcionário precisa de um colaborador específico)
+    opcaoTodos.style.display = (role==='funcionario' ? 'none' : '');
+    if(role==='funcionario' && select.value==='todos') select.value = '';
+  }
 }
 
 async function criarUsuario(){
@@ -1253,11 +1267,13 @@ async function criarUsuario(){
   const role = val('novoUserRole');
   const email = val('novoUserEmail');
   const senha = val('novoUserSenha');
-  const employeeId = val('novoUserFunc') || null;
+  const funcSelecionado = val('novoUserFunc');
+  const employeeId = (funcSelecionado && funcSelecionado!=='todos') ? funcSelecionado : null;
 
   if(!nome || !email || !senha){ alert('Preencha nome, e-mail e senha.'); return; }
   if(senha.length < 6){ alert('A senha precisa ter pelo menos 6 caracteres.'); return; }
-  if(role!=='admin' && !employeeId){ alert('Selecione o colaborador vinculado a este usuário.'); return; }
+  if(role==='funcionario' && !employeeId){ alert('Selecione o colaborador vinculado a este usuário.'); return; }
+  if(role==='rh' && !funcSelecionado){ alert('Selecione um colaborador específico ou a opção "Todos os colaboradores".'); return; }
 
   // Cliente temporário (não guarda sessão) para criar o login sem derrubar o admin logado
   const clienteTemp = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth:{ persistSession:false, autoRefreshToken:false } });
