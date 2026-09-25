@@ -91,6 +91,33 @@
     .form-grid{grid-template-columns:1fr;}
     .form-grid .full{grid-column:1;}
   }
+
+  /* DEMONSTRATIVO DE PAGAMENTO */
+  .holerite{max-width:820px;margin:0 auto;background:#fff;border-radius:10px;padding:30px;box-shadow:0 1px 3px rgba(0,0,0,0.08);}
+  .holerite-topo{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid var(--texto);padding-bottom:14px;margin-bottom:18px;}
+  .holerite-topo h2{margin:0 0 4px;font-size:1.15rem;}
+  .holerite-topo .periodo{font-size:0.85rem;color:var(--cinza);}
+  .holerite-dados{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:0.88rem;margin-bottom:20px;}
+  .holerite-dados div span{color:var(--cinza);display:block;font-size:0.75rem;}
+  .holerite table{margin-bottom:6px;}
+  .holerite th{background:#f1f5f9;}
+  .holerite td.valor, .holerite th.valor{text-align:right;}
+  .holerite-secao-titulo{font-weight:700;font-size:0.85rem;text-transform:uppercase;color:var(--cinza);margin:18px 0 6px;}
+  .holerite-total{display:flex;justify-content:flex-end;gap:30px;margin-top:16px;padding-top:14px;border-top:2px solid var(--texto);}
+  .holerite-total .item{text-align:right;}
+  .holerite-total .item .lbl{font-size:0.78rem;color:var(--cinza);}
+  .holerite-total .item .val{font-size:1.3rem;font-weight:700;}
+  .holerite-assinaturas{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:50px;}
+  .holerite-assinaturas div{border-top:1px solid var(--texto);padding-top:6px;text-align:center;font-size:0.8rem;color:var(--cinza);}
+  .holerite-acoes{max-width:820px;margin:0 auto 16px;display:flex;justify-content:space-between;gap:10px;}
+
+  @media print{
+    body *{visibility:hidden;}
+    #areaImpressao, #areaImpressao *{visibility:visible;}
+    #areaImpressao{position:absolute;left:0;top:0;width:100%;}
+    .holerite{box-shadow:none;max-width:100%;}
+    .no-print{display:none !important;}
+  }
 </style>
 </head>
 <body>
@@ -739,13 +766,138 @@ function renderFolha(){
               <td>${minParaHora(r.extraMin)}</td><td>${minParaHora(r.atrasoMin)}</td><td>${r.faltas}</td>
               <td>${formatBRL(r.valorExtra)}</td>
               <td>${fechada?'<span class="badge badge-verde">Fechada</span>':'<span class="badge badge-amarelo">Aberta</span>'}</td>
-              <td>${fechada
-                ? (currentUser.role==='admin' ? `<button class="icon-btn" onclick="reabrirFolha('${f.id}',${ano},${mes})">Reabrir</button>` : '')
-                : `<button class="icon-btn" onclick="fecharFolha('${f.id}',${ano},${mes})">Fechar</button>`}</td>
+              <td style="white-space:nowrap">
+                <button class="icon-btn" onclick="abrirDetalhesFolha('${f.id}',${ano},${mes})">Detalhes</button>
+                ${fechada ? `<button class="icon-btn" onclick="gerarDemonstrativo('${f.id}',${ano},${mes})">Demonstrativo</button>` : ''}
+                ${fechada
+                  ? (currentUser.role==='admin' ? `<button class="icon-btn" onclick="reabrirFolha('${f.id}',${ano},${mes})">Reabrir</button>` : '')
+                  : `<button class="icon-btn" onclick="fecharFolha('${f.id}',${ano},${mes})">Fechar</button>`}
+              </td>
             </tr>`;
           }).join('') || '<tr><td colspan="9" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
         </tbody>
       </table>
+    </div>
+  `;
+}
+
+/* ======================================================================
+   DETALHES DA FOLHA (modal com todos os valores do cálculo)
+   ====================================================================== */
+function abrirDetalhesFolha(employeeId, ano, mes){
+  const f = dbGet('employees').find(e=>e.id===employeeId);
+  const r = calcularResumoMensal(f, ano, mes);
+  const closures = dbGet('closures');
+  const fechamento = closures.find(c=>c.employeeId===employeeId && c.ano===ano && c.mes===mes);
+  const saldo = r.trabalhadoMin - r.previstoMin;
+  const descontoAtraso = r.atrasoMin * r.valorHora;
+  const horasDiaPrevistas = horasPrevistasDia(f);
+  const descontoFaltas = r.faltas * (horasDiaPrevistas * r.valorHora);
+  const totalPagar = f.salario + r.valorExtra;
+
+  document.getElementById('modalBox').innerHTML = `
+    <h2>Detalhes da Folha — ${f.nome}</h2>
+    <p style="color:var(--cinza);margin-top:-8px">${nomeMes(mes)}/${ano} ${fechamento?`· <span class="badge badge-verde">Fechada em ${new Date(fechamento.data).toLocaleString('pt-BR')} por ${fechamento.fechadoPor}</span>`:'· <span class="badge badge-amarelo">Aberta</span>'}</p>
+    <table>
+      <tbody>
+        <tr><td>Salário base</td><td class="valor">${formatBRL(f.salario)}</td></tr>
+        <tr><td>Carga horária mensal</td><td class="valor">${f.cargaMensal}h</td></tr>
+        <tr><td>Valor da hora normal</td><td class="valor">${formatBRL(r.valorHora)}</td></tr>
+        <tr><td>Horas previstas no período</td><td class="valor">${minParaHora(r.previstoMin)}</td></tr>
+        <tr><td>Horas trabalhadas</td><td class="valor">${minParaHora(r.trabalhadoMin)}</td></tr>
+        <tr><td>Saldo do período</td><td class="valor" style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'}">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>
+        <tr><td>Horas extras (${dbGet('settings').percentualExtra}%)</td><td class="valor">${minParaHora(r.extraMin)}</td></tr>
+        <tr><td><b>Valor das horas extras</b></td><td class="valor"><b>${formatBRL(r.valorExtra)}</b></td></tr>
+        <tr><td>Atrasos (minutos)</td><td class="valor">${minParaHora(r.atrasoMin)}</td></tr>
+        <tr><td>Valor estimado do desconto por atraso</td><td class="valor">${formatBRL(descontoAtraso)}</td></tr>
+        <tr><td>Faltas</td><td class="valor">${r.faltas} dia(s)</td></tr>
+        <tr><td>Valor estimado do desconto por falta</td><td class="valor">${formatBRL(descontoFaltas)}</td></tr>
+      </tbody>
+    </table>
+    <div class="aviso" style="margin-top:14px">⚠️ Os descontos de atraso/falta mostrados aqui são estimativas baseadas no valor-hora, para referência. Aplique-os conforme a política da empresa e a legislação — este total não é subtraído automaticamente do valor a pagar abaixo.</div>
+    <div class="holerite-total" style="margin-top:10px">
+      <div class="item"><div class="lbl">Total a pagar (salário + extras)</div><div class="val">${formatBRL(totalPagar)}</div></div>
+    </div>
+    <div class="modal-acoes">
+      <button class="btn btn-cinza" onclick="fecharModal()">Fechar</button>
+      <button class="btn btn-azul" onclick="fecharModal(); gerarDemonstrativo('${f.id}',${ano},${mes})">Gerar Demonstrativo</button>
+    </div>
+  `;
+  abrirModal();
+}
+
+/* ======================================================================
+   DEMONSTRATIVO DE PAGAMENTO (holerite para imprimir/salvar em PDF)
+   ====================================================================== */
+function gerarDemonstrativo(employeeId, ano, mes){
+  const f = dbGet('employees').find(e=>e.id===employeeId);
+  const r = calcularResumoMensal(f, ano, mes);
+  const s = dbGet('settings');
+  const closures = dbGet('closures');
+  const fechamento = closures.find(c=>c.employeeId===employeeId && c.ano===ano && c.mes===mes);
+  const totalProventos = f.salario + r.valorExtra;
+  const hoje = new Date();
+
+  document.getElementById('content').innerHTML = `
+    <div class="holerite-acoes no-print">
+      <button class="btn btn-cinza" onclick="renderFolha()">← Voltar para Folha</button>
+      <button class="btn btn-azul" onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
+    </div>
+    <div id="areaImpressao">
+      <div class="holerite">
+        <div class="holerite-topo">
+          <div>
+            <h2>${s.empresa || 'Empresa'}</h2>
+            <div class="periodo">Demonstrativo de Pagamento</div>
+          </div>
+          <div class="periodo" style="text-align:right">
+            Referência: <b>${nomeMes(mes)}/${ano}</b><br>
+            Emitido em: ${hoje.toLocaleDateString('pt-BR')}
+          </div>
+        </div>
+
+        <div class="holerite-dados">
+          <div><span>Colaborador</span>${f.nome}</div>
+          <div><span>Cargo</span>${f.cargo||'-'}</div>
+          <div><span>CPF</span>${f.cpf||'-'}</div>
+          <div><span>Setor</span>${f.setor||'-'}</div>
+          <div><span>Matrícula</span>${f.matricula||'-'}</div>
+          <div><span>Admissão</span>${formatDataBR(f.admissao)||'-'}</div>
+        </div>
+
+        <div class="holerite-secao-titulo">Proventos</div>
+        <table>
+          <thead><tr><th>Descrição</th><th>Referência</th><th class="valor">Valor</th></tr></thead>
+          <tbody>
+            <tr><td>Salário base</td><td>${f.cargaMensal}h</td><td class="valor">${formatBRL(f.salario)}</td></tr>
+            ${r.extraMin>0?`<tr><td>Horas extras (${s.percentualExtra}%)</td><td>${minParaHora(r.extraMin)}</td><td class="valor">${formatBRL(r.valorExtra)}</td></tr>`:''}
+          </tbody>
+        </table>
+
+        <div class="holerite-secao-titulo">Informações da jornada (referência, não descontado do total)</div>
+        <table>
+          <thead><tr><th>Descrição</th><th class="valor">Quantidade</th></tr></thead>
+          <tbody>
+            <tr><td>Horas previstas no período</td><td class="valor">${minParaHora(r.previstoMin)}</td></tr>
+            <tr><td>Horas trabalhadas</td><td class="valor">${minParaHora(r.trabalhadoMin)}</td></tr>
+            <tr><td>Atrasos</td><td class="valor">${minParaHora(r.atrasoMin)}</td></tr>
+            <tr><td>Faltas</td><td class="valor">${r.faltas} dia(s)</td></tr>
+          </tbody>
+        </table>
+
+        <div class="holerite-total">
+          <div class="item"><div class="lbl">Total de proventos</div><div class="val">${formatBRL(totalProventos)}</div></div>
+        </div>
+
+        <div class="aviso" style="margin-top:20px">⚠️ Documento gerado automaticamente a partir dos registros de ponto, como ferramenta de apoio. Não substitui o holerite oficial emitido conforme a legislação trabalhista e a política da empresa.</div>
+
+        ${fechamento?`<p style="font-size:0.78rem;color:var(--cinza);margin-top:10px">Folha fechada em ${new Date(fechamento.data).toLocaleString('pt-BR')} por ${fechamento.fechadoPor}.</p>`:''}
+
+        <div class="holerite-assinaturas">
+          <div>${s.empresa || 'Empresa'}</div>
+          <div>${f.nome}</div>
+        </div>
+      </div>
     </div>
   `;
 }
