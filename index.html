@@ -22,8 +22,11 @@
   body{margin:0;font-family:'Segoe UI',Arial,sans-serif;color:var(--texto);background:var(--fundo);position:relative;}
   body::before{
     content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
-    background:url('assets/marca-dagua.png') center center no-repeat;
-    background-size:contain;opacity:0.12;
+    background:url('assets/marca-dagua.png') calc(50% + 115px) center no-repeat;
+    background-size:contain;opacity:0.2;
+  }
+  @media(max-width:800px){
+    body::before{background-position:center center;}
   }
   #loginScreen,#appScreen{position:relative;z-index:1;}
   button{cursor:pointer;font-family:inherit;}
