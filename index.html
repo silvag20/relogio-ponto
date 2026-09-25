@@ -49,7 +49,7 @@
 
   #appScreen{display:none;min-height:100vh;}
   .layout{display:flex;min-height:100vh;}
-  .sidebar{width:230px;background:var(--azul-esc);color:#fff;padding:20px 0;flex-shrink:0;}
+  .sidebar{width:230px;background:var(--azul-esc);color:#fff;padding:20px 0;flex-shrink:0;overflow-y:auto;}
   .sidebar h2{font-size:1.05rem;padding:0 20px 15px;border-bottom:1px solid rgba(255,255,255,0.15);margin:0 0 10px;}
   .sidebar .user{padding:0 20px 15px;font-size:0.8rem;color:#c7d2fe;border-bottom:1px solid rgba(255,255,255,0.15);margin-bottom:10px;}
   .nav-item{display:block;padding:11px 20px;color:#dbeafe;text-decoration:none;font-size:0.9rem;cursor:pointer;border-left:3px solid transparent;}
@@ -84,7 +84,7 @@
   .icon-btn.del{color:var(--vermelho);}
 
   @media(max-width:800px){
-    .sidebar{position:fixed;left:-230px;top:0;bottom:0;z-index:40;transition:left 0.2s;}
+    .sidebar{position:fixed;left:-230px;top:0;bottom:0;z-index:40;transition:left 0.2s;-webkit-overflow-scrolling:touch;}
     .sidebar.aberta{left:0;}
     main{padding:16px;}
     .toggle-menu{display:block;background:var(--azul-esc);color:#fff;border:none;padding:10px 14px;border-radius:6px;margin-bottom:14px;}
