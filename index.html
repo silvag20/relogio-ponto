@@ -765,9 +765,10 @@ function calcularResumoMensal(func, ano, mes){
       faltas++;
     }
   }
-  const valorHora = func.salario / (func.cargaMensal||220) / 60;
-  const valorExtra = extraMin * valorHora * (1 + (settings.percentualExtra||50)/100);
-  return {trabalhadoMin, previstoMin, extraMin, atrasoMin, faltas, valorHora, valorExtra};
+  const valorHora = func.salario / (func.cargaMensal||220);
+  const valorMinuto = valorHora / 60;
+  const valorExtra = extraMin * valorMinuto * (1 + (settings.percentualExtra||50)/100);
+  return {trabalhadoMin, previstoMin, extraMin, atrasoMin, faltas, valorHora, valorMinuto, valorExtra};
 }
 
 function renderHorasExtras(){
@@ -884,9 +885,9 @@ function abrirDetalhesFolha(employeeId, ano, mes){
   const closures = dbGet('closures');
   const fechamento = closures.find(c=>c.employeeId===employeeId && c.ano===ano && c.mes===mes);
   const saldo = r.trabalhadoMin - r.previstoMin;
-  const descontoAtraso = r.atrasoMin * r.valorHora;
+  const descontoAtraso = r.atrasoMin * r.valorMinuto;
   const horasDiaPrevistas = horasPrevistasDia(f);
-  const descontoFaltas = r.faltas * (horasDiaPrevistas * r.valorHora);
+  const descontoFaltas = r.faltas * (horasDiaPrevistas * r.valorMinuto);
   const totalPagar = f.salario + r.valorExtra;
 
   document.getElementById('modalBox').innerHTML = `
