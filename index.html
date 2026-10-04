@@ -1056,7 +1056,7 @@ function renderRelatorios(){
           <input type="number" value="${ano}" onchange="relAno=parseInt(this.value); renderRelatorios()">
         </div>
         <div>
-          <button class="btn btn-azul" onclick="exportarRelatorioAtual()">📁 Exportar CSV</button>
+          <button class="btn btn-azul" onclick="gerarRelatorioPDF()">🖨️ Exportar PDF</button>
         </div>
       </div>
     </div>
@@ -1147,52 +1147,99 @@ function renderResultadoRelatorio(tipo, funcId, ano, mes){
   }
 }
 
-function baixarCSV(nomeArq, linhas){
-  const csv = linhas.map(l=>l.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\n');
-  const blob = new Blob(["\uFEFF"+csv], {type:'text/csv;charset=utf-8;'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = nomeArq; a.click();
-}
-
-function exportarRelatorioAtual(){
+/* Gera versão imprimível do relatório atual (o navegador permite "Salvar como PDF" na janela de impressão) */
+function gerarRelatorioPDF(){
   const hoje = new Date();
   const mes = relMes ?? hoje.getMonth();
   const ano = relAno ?? hoje.getFullYear();
   const tipo = relTipo || 'ponto';
   const funcId = relFuncId || 'todos';
   const funcs = funcionariosDoRelatorio(funcId);
+  const s = dbGet('settings');
+  const nomeColaborador = funcId==='todos' ? 'Todos os colaboradores' : (funcs[0]?.nome || '-');
+
+  let tituloRel = '', corpoHtml = '';
 
   if(tipo==='ponto'){
+    tituloRel = 'Marcação de Ponto';
     const records = dbGet('records').filter(r=>{
       const [ry,rm] = r.date.split('-').map(Number);
       return ry===ano && (rm-1)===mes && funcs.some(f=>f.id===r.employeeId);
-    });
-    const linhas = [['Colaborador','Data','Tipo','Hora','Registrado por']];
-    records.forEach(r=>{
-      const f = dbGet('employees').find(e=>e.id===r.employeeId);
-      linhas.push([f?f.nome:'?', formatDataBR(r.date), r.tipo, r.hora, r.registradoPor||'']);
-    });
-    baixarCSV(`marcacao_ponto_${nomeMes(mes)}_${ano}.csv`, linhas);
+    }).sort((a,b)=> a.date===b.date ? a.hora.localeCompare(b.hora) : a.date.localeCompare(b.date));
+    corpoHtml = `
+      <table>
+        <thead><tr><th>Colaborador</th><th>Data</th><th>Tipo</th><th>Hora</th><th>Registrado por</th></tr></thead>
+        <tbody>${records.map(r=>{
+          const f = dbGet('employees').find(e=>e.id===r.employeeId);
+          return `<tr><td>${f?f.nome:'?'}</td><td>${formatDataBR(r.date)}</td><td>${r.tipo}</td><td>${r.hora}</td><td>${r.registradoPor||''}</td></tr>`;
+        }).join('') || '<tr><td colspan="5">Nenhuma marcação encontrada para este período.</td></tr>'}</tbody>
+      </table>`;
   }
 
   if(tipo==='extras'){
-    const linhas = [['Colaborador','Horas Extras','Valor Hora','% Aplicado','Valor Total (R$)']];
-    funcs.forEach(f=>{
+    tituloRel = 'Horas Extras';
+    let totalExtraMin=0, totalValor=0;
+    const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
-      linhas.push([f.nome, minParaHora(r.extraMin), r.valorHora.toFixed(2), dbGet('settings').percentualExtra, r.valorExtra.toFixed(2)]);
-    });
-    baixarCSV(`horas_extras_${nomeMes(mes)}_${ano}.csv`, linhas);
+      totalExtraMin += r.extraMin; totalValor += r.valorExtra;
+      return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td class="valor">${formatBRL(r.valorHora)}</td>
+        <td class="valor">${s.percentualExtra}%</td><td class="valor">${formatBRL(r.valorExtra)}</td></tr>`;
+    }).join('');
+    corpoHtml = `
+      <table>
+        <thead><tr><th>Colaborador</th><th>Horas Extras</th><th class="valor">Valor Hora</th><th class="valor">% Aplicado</th><th class="valor">Valor Total</th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="5">Nenhum colaborador.</td></tr>'}</tbody>
+        <tfoot><tr><td><b>Total</b></td><td><b>${minParaHora(totalExtraMin)}</b></td><td></td><td></td><td class="valor"><b>${formatBRL(totalValor)}</b></td></tr></tfoot>
+      </table>`;
   }
 
   if(tipo==='folha'){
-    const linhas = [['Colaborador','Salário Base','Horas Trabalhadas','Horas Extras','Valor Extra (R$)','Atrasos','Faltas','Total a Pagar (R$)']];
-    funcs.forEach(f=>{
+    tituloRel = 'Fechamento de Folha para Pagamento';
+    const closures = dbGet('closures');
+    let totalBruto=0;
+    const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
+      const fechada = closures.find(c=>c.employeeId===f.id && c.ano===ano && c.mes===mes);
       const bruto = f.salario + r.valorExtra;
-      linhas.push([f.nome, f.salario.toFixed(2), minParaHora(r.trabalhadoMin), minParaHora(r.extraMin), r.valorExtra.toFixed(2), minParaHora(r.atrasoMin), r.faltas, bruto.toFixed(2)]);
-    });
-    baixarCSV(`fechamento_folha_${nomeMes(mes)}_${ano}.csv`, linhas);
+      totalBruto += bruto;
+      return `<tr>
+        <td>${f.nome}</td><td class="valor">${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
+        <td>${minParaHora(r.extraMin)}</td><td class="valor">${formatBRL(r.valorExtra)}</td>
+        <td>${minParaHora(r.atrasoMin)}</td><td>${r.faltas}</td>
+        <td class="valor"><b>${formatBRL(bruto)}</b></td>
+        <td>${fechada?'Fechada':'Aberta'}</td>
+      </tr>`;
+    }).join('');
+    corpoHtml = `
+      <table>
+        <thead><tr><th>Colaborador</th><th class="valor">Salário Base</th><th>Horas Trab.</th><th>Extras</th><th class="valor">Valor Extra</th><th>Atrasos</th><th>Faltas</th><th class="valor">Total a Pagar</th><th>Status</th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="9">Nenhum colaborador.</td></tr>'}</tbody>
+        <tfoot><tr><td colspan="7"><b>Total geral</b></td><td class="valor"><b>${formatBRL(totalBruto)}</b></td><td></td></tr></tfoot>
+      </table>`;
   }
+
+  document.getElementById('content').innerHTML = `
+    <div class="holerite-acoes no-print">
+      <button class="btn btn-cinza" onclick="renderRelatorios()">← Voltar para Relatórios</button>
+      <button class="btn btn-azul" onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
+    </div>
+    <div id="areaImpressao">
+      <div class="holerite">
+        <div class="holerite-topo">
+          <div>
+            <h2>${s.empresa || 'Empresa'}</h2>
+            <div class="periodo">Relatório: ${tituloRel}</div>
+          </div>
+          <div class="periodo" style="text-align:right">
+            Referência: <b>${nomeMes(mes)}/${ano}</b><br>
+            Colaborador(es): ${nomeColaborador}<br>
+            Emitido em: ${hoje.toLocaleDateString('pt-BR')} às ${hoje.toLocaleTimeString('pt-BR')}
+          </div>
+        </div>
+        ${corpoHtml}
+      </div>
+    </div>
+  `;
 }
 
 function renderFeriados(){
