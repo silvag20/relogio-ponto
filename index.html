@@ -337,7 +337,8 @@ const MENUS = {
     ['atrasos','⚠️ Atrasos e Faltas'],['folha','💰 Folha'],['relatorios','📁 Relatórios'],
     ['feriados','📅 Feriados'],['correcoes','✏️ Correções']],
   funcionario:[['ponto','🕐 Registrar Ponto'],['espelho','📋 Meu Espelho'],['bancohoras','🏦 Meu Banco de Horas'],
-    ['correcoes','✏️ Solicitar Correção']]
+    ['correcoes','✏️ Solicitar Correção']],
+  ponto:[['ponto','🕐 Registrar Ponto']]
 };
 
 function entrarNoApp(){
@@ -345,10 +346,10 @@ function entrarNoApp(){
   document.getElementById('appScreen').style.display='block';
   document.getElementById('userInfo').textContent = currentUser.nome + ' · ' + rotuloPerfil(currentUser.role);
   renderMenu();
-  const inicial = currentUser.role==='funcionario' ? 'ponto' : 'dashboard';
+  const inicial = (currentUser.role==='funcionario' || currentUser.role==='ponto') ? 'ponto' : 'dashboard';
   navegar(inicial);
 }
-function rotuloPerfil(r){ return {admin:'Administrador',rh:'RH / Gestor',funcionario:'Funcionário'}[r]||r; }
+function rotuloPerfil(r){ return {admin:'Administrador',rh:'RH / Gestor',funcionario:'Funcionário',ponto:'Totem de Ponto'}[r]||r; }
 
 function renderMenu(){
   const menu = MENUS[currentUser.role] || [];
@@ -1365,6 +1366,7 @@ function renderUsuarios(){
             <option value="funcionario">Funcionário</option>
             <option value="rh">RH / Gestor</option>
             <option value="admin">Administrador</option>
+            <option value="ponto">Totem de Ponto (login único, só bate ponto)</option>
           </select>
         </div>
         <div><label>E-mail de login</label><input id="novoUserEmail" type="email" placeholder="usuario@empresa.com"></div>
@@ -1385,7 +1387,7 @@ function renderUsuarios(){
       <h3 style="margin-top:0">Usuários cadastrados</h3>
       <table>
         <thead><tr><th>Nome</th><th>Perfil</th><th>Colaborador vinculado</th></tr></thead>
-        <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome || (u.role==='admin'||u.role==='rh' ? 'Todos (acesso geral)' : '-')}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
+        <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome || (u.role==='admin'||u.role==='rh' ? 'Todos (acesso geral)' : (u.role==='ponto' ? 'Todos (só bate ponto)' : '-'))}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
       </table>
     </div>
   `;
@@ -1395,7 +1397,7 @@ function atualizarBlocoVinculo(){
   const role = val('novoUserRole');
   const bloco = document.getElementById('blocoFuncVinculado');
   const select = document.getElementById('novoUserFunc');
-  bloco.style.display = (role==='admin' ? 'none' : 'block');
+  bloco.style.display = (role==='admin' || role==='ponto') ? 'none' : 'block';
   const opcaoTodos = select.querySelector('option[value="todos"]');
   if(opcaoTodos){
     // "Todos" só faz sentido para RH/Gestor (funcionário precisa de um colaborador específico)
@@ -1410,7 +1412,7 @@ async function criarUsuario(){
   const email = val('novoUserEmail');
   const senha = val('novoUserSenha');
   const funcSelecionado = val('novoUserFunc');
-  const employeeId = (funcSelecionado && funcSelecionado!=='todos') ? funcSelecionado : null;
+  const employeeId = (role!=='ponto' && funcSelecionado && funcSelecionado!=='todos') ? funcSelecionado : null;
 
   if(!nome || !email || !senha){ alert('Preencha nome, e-mail e senha.'); return; }
   if(senha.length < 6){ alert('A senha precisa ter pelo menos 6 caracteres.'); return; }
