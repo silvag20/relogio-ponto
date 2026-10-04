@@ -1386,11 +1386,50 @@ function renderUsuarios(){
     <div class="card">
       <h3 style="margin-top:0">Usuários cadastrados</h3>
       <table>
-        <thead><tr><th>Nome</th><th>Perfil</th><th>Colaborador vinculado</th></tr></thead>
-        <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome || (u.role==='admin'||u.role==='rh' ? 'Todos (acesso geral)' : (u.role==='ponto' ? 'Todos (só bate ponto)' : '-'))}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
+        <thead><tr><th>Nome</th><th>Perfil</th><th>Colaborador vinculado</th><th></th></tr></thead>
+        <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome || (u.role==='admin'||u.role==='rh' ? 'Todos (acesso geral)' : (u.role==='ponto' ? 'Todos (só bate ponto)' : '-'))}</td>
+          <td><button class="icon-btn" onclick="abrirModalTrocarSenha('${u.id}','${(u.nome||'').replace(/'/g,"\\'")}')">🔑 Trocar Senha</button></td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
       </table>
     </div>
   `;
+}
+
+function abrirModalTrocarSenha(userId, nome){
+  document.getElementById('modalBox').innerHTML = `
+    <h2>Trocar Senha</h2>
+    <p style="color:var(--cinza);font-size:0.9rem;margin-top:-8px">Usuário: ${nome}</p>
+    <div class="form-grid">
+      <div class="full"><label>Nova senha (mínimo 6 caracteres)</label><input id="novaSenhaUsuario" type="text" placeholder="nova senha provisória"></div>
+    </div>
+    <div class="modal-acoes">
+      <button class="btn btn-cinza" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-azul" onclick="trocarSenhaUsuario('${userId}')">Salvar nova senha</button>
+    </div>
+  `;
+  abrirModal();
+}
+
+async function trocarSenhaUsuario(userId){
+  const novaSenha = val('novaSenhaUsuario');
+  if(!novaSenha || novaSenha.length < 6){ alert('A senha precisa ter pelo menos 6 caracteres.'); return; }
+  const { data: sessaoAtual } = await sb.auth.getSession();
+  const token = sessaoAtual?.session?.access_token;
+  if(!token){ alert('Sessão expirada. Faça login novamente.'); return; }
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/admin-change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${token}`, 'apikey': SUPABASE_KEY },
+      body: JSON.stringify({ userId, novaSenha })
+    });
+    const resultado = await resp.json();
+    if(!resp.ok){ alert('Erro ao trocar senha: '+(resultado.error||resp.statusText)); return; }
+    const u = dbGet('usuarios').find(x=>x.id===userId);
+    logAudit(`Senha alterada pelo administrador para o usuário: ${u?u.nome:userId}`);
+    alert('Senha alterada com sucesso!');
+    fecharModal();
+  }catch(e){
+    alert('Erro ao trocar senha: '+e.message);
+  }
 }
 
 function atualizarBlocoVinculo(){
