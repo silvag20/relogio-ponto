@@ -433,19 +433,26 @@ function renderDashboard(){
 }
 
 function renderPonto(){
-  if(currentUser.role!=='funcionario' && !pontoFuncSelecionado){ pontoFuncSelecionado = (dbGet('employees')[0]||{}).id; }
-  const func = currentUser.role==='funcionario' ? meuFuncionario() : (dbGet('employees')[0]||null);
-  if(!func){ document.getElementById('content').innerHTML = '<h1>Registrar Ponto</h1><p>Nenhum colaborador cadastrado ainda. Peça a um administrador para cadastrar em "Colaboradores".</p>'; return; }
+  const ativos = dbGet('employees').filter(e=>e.status==='Ativo');
+  if(currentUser.role!=='funcionario' && (!pontoFuncSelecionado || !ativos.some(e=>e.id===pontoFuncSelecionado))){ pontoFuncSelecionado = (ativos[0]||{}).id; }
+  const func = currentUser.role==='funcionario' ? meuFuncionario() : (ativos[0]||null);
+  if(!func){ document.getElementById('content').innerHTML = '<h1>Registrar Ponto</h1><p>Nenhum colaborador ativo disponível para registrar ponto. Peça a um administrador para cadastrar ou reativar em "Colaboradores".</p>'; return; }
 
   const empregadosSelect = currentUser.role!=='funcionario' ? `
     <div style="max-width:300px;margin:0 auto 20px">
       <label>Selecionar colaborador</label>
       <select id="selFuncPonto" onchange="pontoFuncSelecionado=this.value; renderPonto()">
-        ${dbGet('employees').map(e=>`<option value="${e.id}" ${e.id===pontoFuncSelecionado?'selected':''}>${e.nome}</option>`).join('')}
+        ${ativos.map(e=>`<option value="${e.id}" ${e.id===pontoFuncSelecionado?'selected':''}>${e.nome}</option>`).join('')}
       </select>
     </div>` : '';
 
-  const alvo = currentUser.role!=='funcionario' ? (dbGet('employees').find(e=>e.id===pontoFuncSelecionado) || func) : func;
+  const alvo = currentUser.role!=='funcionario' ? (ativos.find(e=>e.id===pontoFuncSelecionado) || func) : func;
+
+  if(alvo.status!=='Ativo'){
+    document.getElementById('content').innerHTML = `<h1>Registrar Ponto</h1><div class="aviso">⚠️ ${alvo.nome} está inativo e não pode registrar ponto. Fale com um administrador.</div>`;
+    return;
+  }
+
   const hoje = hojeISO();
   const regsHoje = dbGet('records').filter(r=>r.employeeId===alvo.id && r.date===hoje);
   const prox = proximoTipo(regsHoje);
@@ -491,6 +498,8 @@ function atualizarRelogioPonto(){
 setInterval(()=>{ if(viewAtual==='ponto') atualizarRelogioPonto(); }, 1000);
 
 async function registrarPonto(employeeId, tipo){
+  const funcAlvo = dbGet('employees').find(e=>e.id===employeeId);
+  if(!funcAlvo || funcAlvo.status!=='Ativo'){ alert('Este colaborador está inativo e não pode registrar ponto.'); renderPonto(); return; }
   const hora = horaAgora();
   const { data, error } = await sb.from('time_records')
     .insert({employee_id: employeeId, data: hojeISO(), tipo, hora, registrado_por: currentUser.nome})
