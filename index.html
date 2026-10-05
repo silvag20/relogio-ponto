@@ -248,7 +248,7 @@ function nomeMes(m){ return ['Janeiro','Fevereiro','Março','Abril','Maio','Junh
 function formatBRL(v){ return 'R$ '+ (v||0).toFixed(2).replace('.',','); }
 function formatDataBR(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-'); return `${d}/${m}/${y}`; }
 
-function calcularTrabalhadoDia(regsDoDia){
+function calcularTrabalhadoDia(regsDoDia, dataISO){
   const tipos = {};
   regsDoDia.forEach(r=>tipos[r.tipo]=r.hora);
   if(!tipos['Entrada']) return 0;
@@ -258,11 +258,18 @@ function calcularTrabalhadoDia(regsDoDia){
   const ret = tipos['Retorno'] ? horaParaMin(tipos['Retorno']) : null;
   const sai = tipos['Saída'] ? horaParaMin(tipos['Saída']) : null;
   function diff(a,b){ let d=b-a; if(d<0) d+=24*60; return d; }
+  // Se o dia é hoje, o período em aberto conta até o horário atual
+  const agora = (dataISO && dataISO===hojeISO()) ? horaParaMin(horaAgora()) : null;
   if(saiInt!==null){
     total += diff(ent, saiInt);
-    if(ret!==null && sai!==null) total += diff(ret, sai);
+    if(ret!==null){
+      if(sai!==null) total += diff(ret, sai);
+      else if(agora!==null) total += diff(ret, agora);
+    }
   } else if(sai!==null){
     total += diff(ent, sai);
+  } else if(agora!==null){
+    total += diff(ent, agora);
   }
   return total;
 }
@@ -524,7 +531,7 @@ function renderPonto(){
   const hoje = hojeISO();
   const regsHoje = dbGet('records').filter(r=>r.employeeId===alvo.id && r.date===hoje);
   const prox = proximoTipo(regsHoje);
-  const trabalhadoMin = calcularTrabalhadoDia(regsHoje);
+  const trabalhadoMin = calcularTrabalhadoDia(regsHoje, hoje);
   const previstoMin = horasPrevistasDia(alvo);
   const saldo = trabalhadoMin - previstoMin;
 
@@ -695,7 +702,7 @@ function renderEspelho(){
     const dataISO = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const regsDia = records.filter(r=>r.date===dataISO);
     const tipos = {}; regsDia.forEach(r=>tipos[r.tipo]=r.hora);
-    const trabMin = calcularTrabalhadoDia(regsDia);
+    const trabMin = calcularTrabalhadoDia(regsDia, dataISO);
     const isHoliday = holidays.has(dataISO);
     const prevMin = isHoliday ? 0 : horasPrevistasDia(func);
     const extraMin = Math.max(0, trabMin - prevMin);
@@ -835,7 +842,7 @@ function calcularResumoMensal(func, ano, mes){
     const isHoliday = holidays.has(dataISO);
     const diaSemana = new Date(dataISO+'T12:00:00').getDay();
     const prevDia = isHoliday ? 0 : horasPrevistasDia(func);
-    const trabDia = calcularTrabalhadoDia(regsDia);
+    const trabDia = calcularTrabalhadoDia(regsDia, dataISO);
     trabalhadoMin += trabDia; previstoMin += prevDia;
     extraMin += Math.max(0, trabDia - prevDia);
     if(tipos['Entrada']){
