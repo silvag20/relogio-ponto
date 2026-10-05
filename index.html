@@ -568,6 +568,7 @@ setInterval(()=>{ if(viewAtual==='ponto') atualizarRelogioPonto(); }, 1000);
 async function registrarPonto(employeeId, tipo){
   const funcAlvo = dbGet('employees').find(e=>e.id===employeeId);
   if(!funcAlvo || funcAlvo.status!=='Ativo'){ alert('Este colaborador está inativo e não pode registrar ponto.'); renderPonto(); return; }
+  if(!confirm(`Confirma registrar "${tipo}" para o colaborador ${funcAlvo.nome} às ${horaAgora()}?`)){ return; }
   const hora = horaAgora();
   const { data, error } = await sb.from('time_records')
     .insert({employee_id: employeeId, data: hojeISO(), tipo, hora, registrado_por: currentUser.nome})
