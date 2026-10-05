@@ -717,8 +717,7 @@ function renderEspelho(){
     const temRegistro = regsDia.length>0;
     linhas += `<tr>
       <td>${String(d).padStart(2,'0')}/${String(mes+1).padStart(2,'0')} ${isHoliday?'<span class="badge badge-amarelo">Feriado</span>':''}</td>
-      <td>${tipos['Entrada']||'-'}</td><td>${tipos['Saída Intervalo']||'-'}</td>
-      <td>${tipos['Retorno']||'-'}</td><td>${tipos['Saída']||'-'}</td>
+      ${['Entrada','Saída Intervalo','Retorno','Saída'].map(t=>`<td style="white-space:nowrap">${tipos[t]||'-'}${podeEditar&&tipos[t]?` <button class="icon-btn" title="Excluir só esta marcação (${t})" style="color:var(--vermelho);padding:0 4px" onclick="excluirMarcacaoUnica('${func.id}','${dataISO}','${t}')">✕</button>`:''}</td>`).join('')}
       <td>${minParaHora(trabMin)}</td><td>${minParaHora(prevMin)}</td>
       <td style="color:var(--verde)">${extraMin>0?minParaHora(extraMin):'-'}</td>
       <td style="color:var(--vermelho)">${atrasoMin>0?minParaHora(atrasoMin):'-'}</td>
@@ -812,6 +811,19 @@ async function salvarEdicaoPonto(employeeId, dataISO){
   renderEspelho();
 }
 
+async function excluirMarcacaoUnica(employeeId, dataISO, tipo){
+  if(currentUser.role!=='admin') return;
+  const func = dbGet('employees').find(e=>e.id===employeeId);
+  const reg = dbGet('records').find(r=>r.employeeId===employeeId && r.date===dataISO && r.tipo===tipo);
+  if(!reg) return;
+  const [ano,mes,dia] = dataISO.split('-');
+  if(!confirm(`Excluir somente a marcação "${tipo}" (${String(reg.hora).slice(0,5)}) de ${func?func.nome:''} em ${dia}/${mes}/${ano}? Esta ação não pode ser desfeita.`)) return;
+  const { error } = await sb.from('time_records').delete().eq('id', reg.id);
+  if(error){ alert('Erro ao excluir: '+error.message); return; }
+  state.records = state.records.filter(r=>r.id!==reg.id);
+  logAudit(`Exclusão da marcação "${tipo}" (${reg.hora}) de ${func?func.nome:employeeId} em ${dataISO}`);
+  renderEspelho();
+}
 async function excluirMarcacoesDia(employeeId, dataISO){
   const func = dbGet('employees').find(e=>e.id===employeeId);
   const regsDia = dbGet('records').filter(r=>r.employeeId===employeeId && r.date===dataISO);
