@@ -33,6 +33,9 @@
   .btn-verde{background:var(--verde);color:#fff;}
   .btn-vermelho{background:var(--vermelho);color:#fff;}
   .btn-cinza{background:#e2e8f0;color:var(--texto);}
+  .stat-card.clicavel{cursor:pointer;transition:transform .12s,box-shadow .12s;}
+  .stat-card.clicavel:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.12);}
+  .stat-card.clicavel .label::after{content:' ›';}
   .card{background:var(--card);border-radius:10px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:20px;}
   table{width:100%;border-collapse:collapse;font-size:0.9rem;}
   th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--borda);}
@@ -384,6 +387,32 @@ function meuFuncionario(){
   return dbGet('employees').find(e=>e.id===currentUser.employeeId);
 }
 
+function abrirDetalheDashboard(tipo){
+  const ativos = dbGet('employees').filter(e=>e.status==='Ativo');
+  const hoje = hojeISO();
+  const regsHoje = dbGet('records').filter(r=>r.date===hoje);
+  const entrada = f => regsHoje.find(r=>r.employeeId===f.id && r.tipo==='Entrada');
+  const tol = dbGet('settings').toleranciaAtraso||0;
+  const mes = new Date().getMonth(), ano = new Date().getFullYear();
+  const fechadasIds = new Set(dbGet('closures').filter(c=>c.ano===ano && c.mes===mes).map(c=>c.employeeId));
+  let titulo='', linhas=[];
+  const hh = h => String(h).slice(0,5);
+  if(tipo==='ativos'){ titulo='Funcionários ativos'; linhas = ativos.map(f=>[f.nome, f.cargo||'']); }
+  else if(tipo==='presentes'){ titulo='Presentes hoje'; linhas = ativos.filter(f=>entrada(f)).map(f=>[f.nome, 'Entrada às '+hh(entrada(f).hora)]); }
+  else if(tipo==='ausentes'){ titulo='Ausentes hoje'; linhas = ativos.filter(f=>!entrada(f)).map(f=>[f.nome, 'Sem marcação hoje']); }
+  else if(tipo==='atrasos'){ titulo='Atrasos hoje'; linhas = ativos.filter(f=>{const e=entrada(f); return e && horaParaMin(e.hora) > horaParaMin(f.jornada.entrada)+tol;}).map(f=>[f.nome, `Entrada às ${hh(entrada(f).hora)} (prevista ${hh(f.jornada.entrada)})`]); }
+  else if(tipo==='extras'){ titulo='Horas extras (mês)'; linhas = ativos.map(f=>[f.nome, minParaHora(calcularResumoMensal(f,ano,mes).extraMin)]); }
+  else if(tipo==='trabalhadas'){ titulo='Horas trabalhadas (mês)'; linhas = ativos.map(f=>[f.nome, minParaHora(calcularResumoMensal(f,ano,mes).trabalhadoMin)]); }
+  else if(tipo==='fechadas'){ titulo='Folhas fechadas (mês)'; linhas = ativos.filter(f=>fechadasIds.has(f.id)).map(f=>[f.nome,'Fechada']); }
+  else if(tipo==='abertas'){ titulo='Folhas em aberto'; linhas = ativos.filter(f=>!fechadasIds.has(f.id)).map(f=>[f.nome,'Em aberto']); }
+  document.getElementById('modalBox').innerHTML = `
+    <h2>${titulo} (${linhas.length})</h2>
+    ${linhas.length ? `<table><tbody>${linhas.map(l=>`<tr><td>${l[0]}</td><td style="color:var(--cinza);text-align:right">${l[1]}</td></tr>`).join('')}</tbody></table>` : '<p style="color:var(--cinza)">Nenhum colaborador nesta lista.</p>'}
+    <div class="modal-acoes"><button class="btn btn-cinza" onclick="fecharModal()">Fechar</button></div>
+  `;
+  abrirModal();
+}
+
 function renderDashboard(){
   const emp = dbGet('employees');
   const ativos = emp.filter(e=>e.status==='Ativo');
@@ -412,14 +441,14 @@ function renderDashboard(){
   document.getElementById('content').innerHTML = `
     <h1>Dashboard</h1>
     <div class="grid-cards">
-      <div class="stat-card"><div class="num">${ativos.length}</div><div class="label">Funcionários ativos</div></div>
-      <div class="stat-card"><div class="num" style="color:var(--verde)">${presentesIds.size}</div><div class="label">Presentes hoje</div></div>
-      <div class="stat-card"><div class="num" style="color:var(--vermelho)">${Math.max(ausentes,0)}</div><div class="label">Ausentes hoje</div></div>
-      <div class="stat-card"><div class="num" style="color:var(--amarelo)">${atrasosHoje}</div><div class="label">Atrasos hoje</div></div>
-      <div class="stat-card"><div class="num">${minParaHora(horasExtrasMes)}</div><div class="label">Horas extras (mês)</div></div>
-      <div class="stat-card"><div class="num">${minParaHora(horasTrabMes)}</div><div class="label">Horas trabalhadas (mês)</div></div>
-      <div class="stat-card"><div class="num">${fechadas}</div><div class="label">Folhas fechadas (mês)</div></div>
-      <div class="stat-card"><div class="num">${ativos.length-fechadas}</div><div class="label">Folhas em aberto</div></div>
+      <div class="stat-card clicavel" title="Clique para ver os nomes" onclick="abrirDetalheDashboard('ativos')"><div class="num">${ativos.length}</div><div class="label">Funcionários ativos</div></div>
+      <div class="stat-card clicavel" title="Clique para ver os nomes" onclick="abrirDetalheDashboard('presentes')"><div class="num" style="color:var(--verde)">${presentesIds.size}</div><div class="label">Presentes hoje</div></div>
+      <div class="stat-card clicavel" title="Clique para ver os nomes" onclick="abrirDetalheDashboard('ausentes')"><div class="num" style="color:var(--vermelho)">${Math.max(ausentes,0)}</div><div class="label">Ausentes hoje</div></div>
+      <div class="stat-card clicavel" title="Clique para ver os nomes" onclick="abrirDetalheDashboard('atrasos')"><div class="num" style="color:var(--amarelo)">${atrasosHoje}</div><div class="label">Atrasos hoje</div></div>
+      <div class="stat-card clicavel" title="Clique para ver os nomes" onclick="abrirDetalheDashboard('extras')"><div class="num">${minParaHora(horasExtrasMes)}</div><div class="label">Horas extras (mês)</div></div>
+      <div class="stat-card clicavel" title="Clique para ver os nomes" onclick="abrirDetalheDashboard('trabalhadas')"><div class="num">${minParaHora(horasTrabMes)}</div><div class="label">Horas trabalhadas (mês)</div></div>
+      <div class="stat-card clicavel" title="Clique para ver os nomes" onclick="abrirDetalheDashboard('fechadas')"><div class="num">${fechadas}</div><div class="label">Folhas fechadas (mês)</div></div>
+      <div class="stat-card clicavel" title="Clique para ver os nomes" onclick="abrirDetalheDashboard('abertas')"><div class="num">${ativos.length-fechadas}</div><div class="label">Folhas em aberto</div></div>
     </div>
     <div class="card">
       <h3 style="margin-top:0">🏆 Ranking de Horas Extras — ${nomeMes(mesAtual)}/${anoAtual}</h3>
