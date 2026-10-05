@@ -415,19 +415,28 @@ function renderDashboard(){
       <div class="stat-card"><div class="num">${ativos.length-fechadas}</div><div class="label">Folhas em aberto</div></div>
     </div>
     <div class="card">
-      <h3 style="margin-top:0">Horas extras por funcionário (mês atual)</h3>
-      ${ativos.map(f=>{
-        const r = calcularResumoMensal(f, anoAtual, mesAtual);
-        const pct = Math.min(100, (r.extraMin/60)*8);
-        return `<div style="margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:3px">
-            <span>${f.nome}</span><span>${minParaHora(r.extraMin)}</span>
-          </div>
-          <div style="background:#e2e8f0;border-radius:6px;height:8px;">
-            <div style="background:var(--azul);width:${pct}%;height:8px;border-radius:6px;"></div>
-          </div>
-        </div>`;
-      }).join('') || '<p style="color:var(--cinza)">Nenhum colaborador cadastrado.</p>'}
+      <h3 style="margin-top:0">🏆 Ranking de Horas Extras — ${nomeMes(mesAtual)}/${anoAtual}</h3>
+      ${(() => {
+        const ranking = ativos.map(f=>{
+          const r = calcularResumoMensal(f, anoAtual, mesAtual);
+          return {nome:f.nome, extraMin:r.extraMin};
+        }).sort((a,b)=> b.extraMin - a.extraMin);
+        if(ranking.length===0) return '<p style="color:var(--cinza)">Nenhum colaborador cadastrado.</p>';
+        const maior = Math.max(1, ranking[0].extraMin);
+        return ranking.map((item,i)=>{
+          const pct = Math.max(2, (item.extraMin/maior)*100);
+          const cor = i===0 && item.extraMin>0 ? 'var(--amarelo)' : 'var(--azul)';
+          return `<div style="margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:3px">
+              <span>${i===0 && item.extraMin>0 ? '🥇 ' : ''}${item.nome}</span>
+              <span style="font-weight:600">${minParaHora(item.extraMin)}</span>
+            </div>
+            <div style="background:#e2e8f0;border-radius:6px;height:10px;">
+              <div style="background:${cor};width:${pct}%;height:10px;border-radius:6px;transition:width 0.4s"></div>
+            </div>
+          </div>`;
+        }).join('');
+      })()}
     </div>
   `;
 }
