@@ -1440,11 +1440,33 @@ function renderAuditoria(){
 /* ======================================================================
    USUÁRIOS E ACESSOS (criar login + senha direto pelo app)
    ====================================================================== */
+function urlDoApp(){ return location.origin + location.pathname.replace(/index\.html$/,''); }
+function textoConviteApp(){ return `Acesse o aplicativo Relógio de Ponto do Grupo Calissa pelo link abaixo e entre com seu e-mail e senha:\n${urlDoApp()}`; }
+async function copiarLinkApp(){
+  const url = urlDoApp();
+  try{ await navigator.clipboard.writeText(url); alert('Link copiado!\n'+url); }
+  catch(e){ prompt('Copie o link abaixo:', url); }
+}
+async function compartilharLinkApp(){
+  if(navigator.share){
+    try{ await navigator.share({title:'Relógio de Ponto - Grupo Calissa', text:textoConviteApp(), url:urlDoApp()}); return; }
+    catch(e){ if(e && e.name==='AbortError') return; }
+  }
+  window.open('https://wa.me/?text='+encodeURIComponent(textoConviteApp()), '_blank');
+}
+
 function renderUsuarios(){
   const usuarios = dbGet('usuarios');
   const emp = dbGet('employees');
   document.getElementById('content').innerHTML = `
     <h1>Usuários e Acessos</h1>
+    <div class="card" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+      <div><strong>Link do aplicativo</strong><div style="color:var(--cinza);font-size:.85rem">Envie para o usuário acessar com e-mail e senha.</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-verde" onclick="compartilharLinkApp()">📤 Compartilhar link</button>
+        <button class="btn btn-cinza" onclick="copiarLinkApp()">📋 Copiar link</button>
+      </div>
+    </div>
     <div class="card">
       <h3 style="margin-top:0">Criar novo usuário</h3>
       <div class="form-grid">
