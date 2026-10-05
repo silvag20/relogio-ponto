@@ -832,7 +832,7 @@ function calcularResumoMensal(func, ano, mes){
   const records = dbGet('records').filter(r=>r.employeeId===func.id);
   const holidays = new Set(dbGet('holidays').map(h=>h.data));
   const settings = dbGet('settings');
-  let trabalhadoMin=0, previstoMin=0, extraMin=0, atrasoMin=0, faltas=0;
+  let trabalhadoMin=0, previstoMin=0, extraMin=0, atrasoMin=0, faltas=0, abertoHojeMin=0;
   const hojeStr = hojeISO();
   for(let d=1; d<=dias; d++){
     const dataISO = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -843,8 +843,11 @@ function calcularResumoMensal(func, ano, mes){
     const diaSemana = new Date(dataISO+'T12:00:00').getDay();
     const prevDia = isHoliday ? 0 : horasPrevistasDia(func);
     const trabDia = calcularTrabalhadoDia(regsDia, dataISO);
-    trabalhadoMin += trabDia; previstoMin += prevDia;
-    extraMin += Math.max(0, trabDia - prevDia);
+    // Hoje sem Saída: dia ainda em andamento, fica fora do saldo e das extras
+    const emAndamento = (dataISO===hojeStr && tipos['Entrada'] && !tipos['Saída']);
+    trabalhadoMin += trabDia;
+    if(emAndamento){ abertoHojeMin = trabDia; }
+    else { previstoMin += prevDia; extraMin += Math.max(0, trabDia - prevDia); }
     if(tipos['Entrada']){
       atrasoMin += Math.max(0, horaParaMin(tipos['Entrada']) - horaParaMin(func.jornada.entrada) - (settings.toleranciaAtraso||0));
     } else if(prevDia>0 && diaSemana!==0 && diaSemana!==6){
@@ -854,7 +857,7 @@ function calcularResumoMensal(func, ano, mes){
   const valorHora = func.salario / (func.cargaMensal||220);
   const valorMinuto = valorHora / 60;
   const valorExtra = extraMin * valorMinuto * (1 + (settings.percentualExtra||50)/100);
-  return {trabalhadoMin, previstoMin, extraMin, atrasoMin, faltas, valorHora, valorMinuto, valorExtra};
+  return {trabalhadoMin, abertoHojeMin, previstoMin, extraMin, atrasoMin, faltas, valorHora, valorMinuto, valorExtra};
 }
 
 function renderHorasExtras(){
@@ -889,7 +892,7 @@ function renderBancoHoras(){
         <tbody>
           ${emp.map(f=>{
             const r = calcularResumoMensal(f, ano, mes);
-            const saldo = r.trabalhadoMin - r.previstoMin;
+            const saldo = (r.trabalhadoMin - r.abertoHojeMin) - r.previstoMin;
             return `<tr><td>${f.nome}</td><td>${minParaHora(r.trabalhadoMin)}</td><td>${minParaHora(r.previstoMin)}</td>
               <td style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'};font-weight:600">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>`;
           }).join('') || '<tr><td colspan="4" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
@@ -970,7 +973,7 @@ function abrirDetalhesFolha(employeeId, ano, mes){
   const r = calcularResumoMensal(f, ano, mes);
   const closures = dbGet('closures');
   const fechamento = closures.find(c=>c.employeeId===employeeId && c.ano===ano && c.mes===mes);
-  const saldo = r.trabalhadoMin - r.previstoMin;
+  const saldo = (r.trabalhadoMin - r.abertoHojeMin) - r.previstoMin;
   const descontoAtraso = r.atrasoMin * r.valorMinuto;
   const horasDiaPrevistas = horasPrevistasDia(f);
   const descontoFaltas = r.faltas * (horasDiaPrevistas * r.valorMinuto);
