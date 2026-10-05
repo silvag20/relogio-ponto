@@ -438,7 +438,66 @@ function renderDashboard(){
         }).join('');
       })()}
     </div>
+    <div class="card">
+      <h3 style="margin-top:0">🥧 Distribuição de Horas Extras por Colaborador — ${nomeMes(mesAtual)}/${anoAtual}</h3>
+      ${gerarGraficoPizzaExtras(ativos, anoAtual, mesAtual)}
+    </div>
   `;
+}
+
+const CORES_CATEGORICAS = ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#008300','#4a3aa7','#e34948'];
+
+function gerarGraficoPizzaExtras(ativos, ano, mes){
+  let dados = ativos.map(f=>{
+    const r = calcularResumoMensal(f, ano, mes);
+    return {nome:f.nome, min:r.extraMin};
+  }).filter(d=>d.min>0).sort((a,b)=>b.min-a.min);
+
+  if(dados.length===0){
+    return '<p style="color:var(--cinza)">Nenhuma hora extra registrada neste mês.</p>';
+  }
+
+  // Mais de 8 fatias: agrupa o excedente em "Outros" para manter as cores distinguíveis
+  if(dados.length > 8){
+    const top = dados.slice(0,7);
+    const outrosMin = dados.slice(7).reduce((s,d)=>s+d.min,0);
+    dados = [...top, {nome:'Outros', min:outrosMin}];
+  }
+
+  const total = dados.reduce((s,d)=>s+d.min,0);
+  const cx=110, cy=110, raio=100;
+  let anguloAtual = -Math.PI/2;
+  const fatias = dados.map((d,i)=>{
+    const fracao = d.min/total;
+    const anguloIni = anguloAtual;
+    const anguloFim = anguloAtual + fracao*Math.PI*2;
+    anguloAtual = anguloFim;
+    const x1 = cx + raio*Math.cos(anguloIni), y1 = cy + raio*Math.sin(anguloIni);
+    const x2 = cx + raio*Math.cos(anguloFim), y2 = cy + raio*Math.sin(anguloFim);
+    const largeArc = (anguloFim-anguloIni) > Math.PI ? 1 : 0;
+    const cor = CORES_CATEGORICAS[i % CORES_CATEGORICAS.length];
+    const pct = (fracao*100).toFixed(1);
+    const d_path = dados.length===1
+      ? `M ${cx-raio},${cy} A ${raio},${raio} 0 1,1 ${cx+raio},${cy} A ${raio},${raio} 0 1,1 ${cx-raio},${cy} Z`
+      : `M ${cx},${cy} L ${x1.toFixed(2)},${y1.toFixed(2)} A ${raio},${raio} 0 ${largeArc},1 ${x2.toFixed(2)},${y2.toFixed(2)} Z`;
+    return `<path d="${d_path}" fill="${cor}" stroke="#fff" stroke-width="2"><title>${d.nome}: ${minParaHora(d.min)} (${pct}%)</title></path>`;
+  }).join('');
+
+  const legenda = dados.map((d,i)=>{
+    const cor = CORES_CATEGORICAS[i % CORES_CATEGORICAS.length];
+    const pct = ((d.min/total)*100).toFixed(1);
+    return `<div style="display:flex;align-items:center;gap:8px;font-size:0.85rem;margin-bottom:8px">
+      <span style="width:12px;height:12px;border-radius:3px;background:${cor};flex-shrink:0"></span>
+      <span style="flex:1">${d.nome}</span>
+      <span style="color:var(--cinza)">${minParaHora(d.min)} · ${pct}%</span>
+    </div>`;
+  }).join('');
+
+  return `
+    <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:center;justify-content:center">
+      <svg width="220" height="220" viewBox="0 0 220 220">${fatias}</svg>
+      <div style="min-width:220px;flex:1;max-width:320px">${legenda}</div>
+    </div>`;
 }
 
 function renderPonto(){
