@@ -277,6 +277,15 @@ function calcularTrabalhadoDia(regsDoDia, dataISO){
   return total;
 }
 
+function ehDiaEspecial(dataISO){
+  // Domingo ou feriado: horas trabalhadas pagas com o adicional de domingo/feriado (100%)
+  const dow = new Date(dataISO+'T12:00:00').getDay();
+  return dow===0 || dbGet('holidays').some(h=>h.data===dataISO);
+}
+function fmtExtras(r){
+  return minParaHora(r.extraMin) + (r.domingoMin>0 ? ` + ${minParaHora(r.domingoMin)} <small style="color:var(--cinza)">(dom/feriado ${dbGet('settings').percentualExtraFeriado}%)</small>` : '');
+}
+
 function horasPrevistasDia(func){
   const j = func.jornada;
   const ent = horaParaMin(j.entrada), int1 = horaParaMin(j.intervaloInicio), int2 = horaParaMin(j.intervaloFim), sai = horaParaMin(j.saida);
@@ -400,8 +409,8 @@ function abrirDetalheDashboard(tipo){
   if(tipo==='ativos'){ titulo='Funcionários ativos'; linhas = ativos.map(f=>[f.nome, f.cargo||'']); }
   else if(tipo==='presentes'){ titulo='Presentes hoje'; linhas = ativos.filter(f=>entrada(f)).map(f=>[f.nome, 'Entrada às '+hh(entrada(f).hora)]); }
   else if(tipo==='ausentes'){ titulo='Ausentes hoje'; linhas = ativos.filter(f=>!entrada(f)).map(f=>[f.nome, 'Sem marcação hoje']); }
-  else if(tipo==='atrasos'){ titulo='Atrasos hoje'; linhas = ativos.filter(f=>{const e=entrada(f); return e && horaParaMin(e.hora) > horaParaMin(f.jornada.entrada)+tol;}).map(f=>[f.nome, `Entrada às ${hh(entrada(f).hora)} (prevista ${hh(f.jornada.entrada)})`]); }
-  else if(tipo==='extras'){ titulo='Horas extras (mês)'; linhas = ativos.map(f=>[f.nome, minParaHora(calcularResumoMensal(f,ano,mes).extraMin)]); }
+  else if(tipo==='atrasos'){ titulo='Atrasos hoje'; linhas = ativos.filter(f=>{const e=entrada(f); return !ehDiaEspecial(hoje) && e && horaParaMin(e.hora) > horaParaMin(f.jornada.entrada)+tol;}).map(f=>[f.nome, `Entrada às ${hh(entrada(f).hora)} (prevista ${hh(f.jornada.entrada)})`]); }
+  else if(tipo==='extras'){ titulo='Horas extras (mês)'; linhas = ativos.map(f=>[f.nome, minParaHora(calcularResumoMensal(f,ano,mes).extraTotalMin)]); }
   else if(tipo==='trabalhadas'){ titulo='Horas trabalhadas (mês)'; linhas = ativos.map(f=>[f.nome, minParaHora(calcularResumoMensal(f,ano,mes).trabalhadoMin)]); }
   else if(tipo==='fechadas'){ titulo='Folhas fechadas (mês)'; linhas = ativos.filter(f=>fechadasIds.has(f.id)).map(f=>[f.nome,'Fechada']); }
   else if(tipo==='abertas'){ titulo='Folhas em aberto'; linhas = ativos.filter(f=>!fechadasIds.has(f.id)).map(f=>[f.nome,'Em aberto']); }
@@ -421,9 +430,10 @@ function renderDashboard(){
   const presentesIds = new Set(records.filter(r=>r.tipo==='Entrada').map(r=>r.employeeId));
   const ausentes = ativos.length - presentesIds.size;
   let atrasosHoje = 0;
+  const hojeEspecial = ehDiaEspecial(hoje);
   ativos.forEach(f=>{
     const ent = records.find(r=>r.employeeId===f.id && r.tipo==='Entrada');
-    if(ent){
+    if(ent && !hojeEspecial){
       const prevista = horaParaMin(f.jornada.entrada) + (dbGet('settings').toleranciaAtraso||0);
       if(horaParaMin(ent.hora) > prevista) atrasosHoje++;
     }
@@ -433,7 +443,7 @@ function renderDashboard(){
   let horasExtrasMes=0, horasTrabMes=0;
   ativos.forEach(f=>{
     const r = calcularResumoMensal(f, anoAtual, mesAtual);
-    horasExtrasMes += r.extraMin; horasTrabMes += r.trabalhadoMin;
+    horasExtrasMes += r.extraTotalMin; horasTrabMes += r.trabalhadoMin;
   });
   const closures = dbGet('closures');
   const fechadas = closures.filter(c=>c.ano===anoAtual && c.mes===mesAtual).length;
@@ -456,7 +466,7 @@ function renderDashboard(){
       ${(() => {
         const ranking = ativos.map(f=>{
           const r = calcularResumoMensal(f, anoAtual, mesAtual);
-          return {nome:f.nome, saldoMin:r.extraMin - r.atrasoMin};
+          return {nome:f.nome, saldoMin:r.extraTotalMin - r.atrasoMin};
         }).sort((a,b)=> b.saldoMin - a.saldoMin);
         if(ranking.length===0) return '<p style="color:var(--cinza)">Nenhum colaborador cadastrado.</p>';
         const maior = Math.max(1, ...ranking.map(i=>Math.abs(i.saldoMin)));
@@ -488,7 +498,7 @@ const CORES_CATEGORICAS = ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#0
 function gerarGraficoPizzaExtras(ativos, ano, mes){
   let dados = ativos.map(f=>{
     const r = calcularResumoMensal(f, ano, mes);
-    return {nome:f.nome, min:r.extraMin};
+    return {nome:f.nome, min:r.extraTotalMin};
   }).filter(d=>d.min>0).sort((a,b)=>b.min-a.min);
 
   if(dados.length===0){
@@ -731,7 +741,7 @@ function renderEspelho(){
   const dias = new Date(ano, mes+1, 0).getDate();
   const records = dbGet('records').filter(r=>r.employeeId===func.id);
   const holidays = new Set(dbGet('holidays').map(h=>h.data));
-  let totalTrab=0, totalPrev=0, totalExtra=0, totalAtraso=0;
+  let totalTrab=0, totalPrev=0, totalExtra=0, totalAtraso=0, totalDom=0;
   let linhas = '';
   for(let d=1; d<=dias; d++){
     const dataISO = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -739,23 +749,26 @@ function renderEspelho(){
     const tipos = {}; regsDia.forEach(r=>tipos[r.tipo]=r.hora);
     const trabMin = calcularTrabalhadoDia(regsDia, dataISO);
     const isHoliday = holidays.has(dataISO);
-    const prevMin = isHoliday ? 0 : horasPrevistasDia(func);
-    const extraMin = Math.max(0, trabMin - prevMin);
+    const isDomingo = new Date(dataISO+'T12:00:00').getDay()===0;
+    const diaEspecial = isHoliday || isDomingo;
+    const prevMin = diaEspecial ? 0 : horasPrevistasDia(func);
+    const extraMin = diaEspecial ? 0 : Math.max(0, trabMin - prevMin);
+    const domingoDia = diaEspecial ? trabMin : 0;
     let atrasoMin = 0;
-    if(tipos['Entrada']){
+    if(tipos['Entrada'] && !diaEspecial){
       const tol = dbGet('settings').toleranciaAtraso||0;
       atrasoMin = Math.max(0, horaParaMin(tipos['Entrada']) - horaParaMin(func.jornada.entrada) - tol);
     }
-    totalTrab += trabMin; totalPrev += prevMin; totalExtra += extraMin; totalAtraso += atrasoMin;
-    if(regsDia.length===0 && prevMin===0) continue;
+    totalTrab += trabMin; totalPrev += prevMin; totalExtra += extraMin; totalAtraso += atrasoMin; totalDom += domingoDia;
+    if(regsDia.length===0 && prevMin===0 && !isDomingo && !isHoliday) continue;
     const podeEditar = currentUser.role==='admin';
     const temRegistro = regsDia.length>0;
     linhas += `<tr>
-      <td>${String(d).padStart(2,'0')}/${String(mes+1).padStart(2,'0')} ${isHoliday?'<span class="badge badge-amarelo">Feriado</span>':''}</td>
+      <td>${String(d).padStart(2,'0')}/${String(mes+1).padStart(2,'0')} ${isHoliday?'<span class="badge badge-amarelo">Feriado</span>':''}${isDomingo?' <span class="badge badge-amarelo">Domingo</span>':''}</td>
       <td>${tipos['Entrada']||'-'}</td><td>${tipos['Saída Intervalo']||'-'}</td>
       <td>${tipos['Retorno']||'-'}</td><td>${tipos['Saída']||'-'}</td>
       <td>${minParaHora(trabMin)}</td><td>${minParaHora(prevMin)}</td>
-      <td style="color:var(--verde)">${extraMin>0?minParaHora(extraMin):'-'}</td>
+      <td style="color:var(--verde)">${domingoDia>0?`${minParaHora(domingoDia)} <small>(100%)</small>`:(extraMin>0?minParaHora(extraMin):'-')}</td>
       <td style="color:var(--vermelho)">${atrasoMin>0?minParaHora(atrasoMin):'-'}</td>
       ${podeEditar?`<td style="white-space:nowrap">
         <button class="icon-btn" onclick="abrirModalEdicaoPonto('${func.id}','${dataISO}')">✏️ Editar</button>
@@ -773,6 +786,7 @@ function renderEspelho(){
       <div class="stat-card"><div class="num" style="color:var(--verde)">${minParaHora(extraLiqEsp)}</div><div class="label">Horas extras (líquidas)</div></div>
       <div class="stat-card"><div class="num" style="color:var(--vermelho)">${minParaHora(atrasoLiqEsp)}</div><div class="label">Atrasos (líquidos)</div></div>
       <div class="stat-card"><div class="num" style="color:var(--azul)">${minParaHora(compensadoEsp)}</div><div class="label">Compensado (extras − atrasos)</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--verde)">${minParaHora(totalDom)}</div><div class="label">Domingos/feriados (100%)</div></div>
     </div>
     <div class="card" style="overflow-x:auto">
       <table>
@@ -903,7 +917,7 @@ function calcularResumoMensal(func, ano, mes){
   const records = dbGet('records').filter(r=>r.employeeId===func.id);
   const holidays = new Set(dbGet('holidays').map(h=>h.data));
   const settings = dbGet('settings');
-  let trabalhadoMin=0, previstoMin=0, extraMin=0, atrasoMin=0, faltas=0, abertoHojeMin=0;
+  let trabalhadoMin=0, previstoMin=0, extraMin=0, atrasoMin=0, faltas=0, abertoHojeMin=0, domingoMin=0;
   const hojeStr = hojeISO();
   for(let d=1; d<=dias; d++){
     const dataISO = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -912,14 +926,16 @@ function calcularResumoMensal(func, ano, mes){
     const tipos = {}; regsDia.forEach(r=>tipos[r.tipo]=r.hora);
     const isHoliday = holidays.has(dataISO);
     const diaSemana = new Date(dataISO+'T12:00:00').getDay();
-    const prevDia = isHoliday ? 0 : horasPrevistasDia(func);
+    const diaEspecial = isHoliday || diaSemana===0;
+    const prevDia = diaEspecial ? 0 : horasPrevistasDia(func);
     const trabDia = calcularTrabalhadoDia(regsDia, dataISO);
     // Hoje sem Saída: dia ainda em andamento, fica fora do saldo e das extras
     const emAndamento = (dataISO===hojeStr && tipos['Entrada'] && !tipos['Saída']);
     trabalhadoMin += trabDia;
     if(emAndamento){ abertoHojeMin = trabDia; }
+    else if(diaEspecial){ domingoMin += trabDia; }
     else { previstoMin += prevDia; extraMin += Math.max(0, trabDia - prevDia); }
-    if(tipos['Entrada']){
+    if(tipos['Entrada'] && !diaEspecial){
       atrasoMin += Math.max(0, horaParaMin(tipos['Entrada']) - horaParaMin(func.jornada.entrada) - (settings.toleranciaAtraso||0));
     } else if(prevDia>0 && diaSemana!==0 && diaSemana!==6){
       faltas++;
@@ -932,8 +948,9 @@ function calcularResumoMensal(func, ano, mes){
   const compensadoMin = Math.min(extraBrutoMin, atrasoBrutoMin);
   extraMin = extraBrutoMin - compensadoMin;
   atrasoMin = atrasoBrutoMin - compensadoMin;
-  const valorExtra = extraMin * valorMinuto * (1 + (settings.percentualExtra||50)/100);
-  return {trabalhadoMin, abertoHojeMin, previstoMin, extraMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, faltas, valorHora, valorMinuto, valorExtra};
+  const valorExtra = extraMin * valorMinuto * (1 + (settings.percentualExtra||50)/100)
+    + domingoMin * valorMinuto * (1 + (settings.percentualExtraFeriado||100)/100);
+  return {trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraMin+domingoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, faltas, valorHora, valorMinuto, valorExtra};
 }
 
 function renderHorasExtras(){
@@ -947,7 +964,7 @@ function renderHorasExtras(){
         <tbody>
           ${emp.map(f=>{
             const r = calcularResumoMensal(f, ano, mes);
-            return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td>${formatBRL(r.valorHora)}</td>
+            return `<tr><td>${f.nome}</td><td>${fmtExtras(r)}</td><td>${formatBRL(r.valorHora)}</td>
               <td>${dbGet('settings').percentualExtra}%</td><td>${formatBRL(r.valorExtra)}</td></tr>`;
           }).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
         </tbody>
@@ -1023,7 +1040,7 @@ function renderFolha(){
             const fechada = closures.find(c=>c.employeeId===f.id && c.ano===ano && c.mes===mes);
             return `<tr>
               <td>${f.nome}</td><td>${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
-              <td>${minParaHora(r.extraMin)}</td><td>${minParaHora(r.atrasoMin)}</td><td>${r.faltas}</td>
+              <td>${fmtExtras(r)}</td><td>${minParaHora(r.atrasoMin)}</td><td>${r.faltas}</td>
               <td>${formatBRL(r.valorExtra)}</td>
               <td>${fechada?'<span class="badge badge-verde">Fechada</span>':'<span class="badge badge-amarelo">Aberta</span>'}</td>
               <td style="white-space:nowrap">
@@ -1067,7 +1084,7 @@ function abrirDetalhesFolha(employeeId, ano, mes){
         <tr><td>Horas trabalhadas</td><td class="valor">${minParaHora(r.trabalhadoMin)}</td></tr>
         <tr><td>Saldo do período</td><td class="valor" style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'}">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>
         <tr><td>Compensado (extras abatendo atrasos)</td><td class="valor">${minParaHora(r.compensadoMin)}</td></tr>
-        <tr><td>Horas extras líquidas (${dbGet('settings').percentualExtra}%)</td><td class="valor">${minParaHora(r.extraMin)}</td></tr>
+        <tr><td>Horas extras líquidas (${dbGet('settings').percentualExtra}%)</td><td class="valor">${fmtExtras(r)}</td></tr>
         <tr><td><b>Valor das horas extras</b></td><td class="valor"><b>${formatBRL(r.valorExtra)}</b></td></tr>
         <tr><td>Atrasos (minutos)</td><td class="valor">${minParaHora(r.atrasoMin)}</td></tr>
         <tr><td>Valor estimado do desconto por atraso</td><td class="valor">${formatBRL(descontoAtraso)}</td></tr>
@@ -1131,7 +1148,7 @@ function gerarDemonstrativo(employeeId, ano, mes){
           <thead><tr><th>Descrição</th><th>Referência</th><th class="valor">Valor</th></tr></thead>
           <tbody>
             <tr><td>Salário base</td><td>${f.cargaMensal}h</td><td class="valor">${formatBRL(f.salario)}</td></tr>
-            ${r.extraMin>0?`<tr><td>Horas extras (${s.percentualExtra}%)</td><td>${minParaHora(r.extraMin)}</td><td class="valor">${formatBRL(r.valorExtra)}</td></tr>`:''}
+            ${(r.extraMin>0||r.domingoMin>0)?`<tr><td>Horas extras (${s.percentualExtra}%) / domingo-feriado (${s.percentualExtraFeriado}%)</td><td>${fmtExtras(r)}</td><td class="valor">${formatBRL(r.valorExtra)}</td></tr>`:''}
           </tbody>
         </table>
 
@@ -1263,8 +1280,8 @@ function renderResultadoRelatorio(tipo, funcId, ano, mes){
     let totalExtraMin=0, totalValor=0;
     const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
-      totalExtraMin += r.extraMin; totalValor += r.valorExtra;
-      return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td>${formatBRL(r.valorHora)}</td>
+      totalExtraMin += r.extraTotalMin; totalValor += r.valorExtra;
+      return `<tr><td>${f.nome}</td><td>${fmtExtras(r)}</td><td>${formatBRL(r.valorHora)}</td>
         <td>${dbGet('settings').percentualExtra}%</td><td>${formatBRL(r.valorExtra)}</td></tr>`;
     }).join('');
     alvo.innerHTML = `
@@ -1291,7 +1308,7 @@ function renderResultadoRelatorio(tipo, funcId, ano, mes){
       totalBruto += bruto;
       return `<tr>
         <td>${f.nome}</td><td>${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
-        <td>${minParaHora(r.extraMin)}</td><td>${formatBRL(r.valorExtra)}</td>
+        <td>${fmtExtras(r)}</td><td>${formatBRL(r.valorExtra)}</td>
         <td>${minParaHora(r.atrasoMin)}</td><td>${r.faltas}</td>
         <td><b>${formatBRL(bruto)}</b></td>
         <td>${fechada?'<span class="badge badge-verde">Fechada</span>':'<span class="badge badge-amarelo">Aberta</span>'}</td>
@@ -1347,8 +1364,8 @@ function gerarRelatorioPDF(){
     let totalExtraMin=0, totalValor=0;
     const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
-      totalExtraMin += r.extraMin; totalValor += r.valorExtra;
-      return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td class="valor">${formatBRL(r.valorHora)}</td>
+      totalExtraMin += r.extraTotalMin; totalValor += r.valorExtra;
+      return `<tr><td>${f.nome}</td><td>${fmtExtras(r)}</td><td class="valor">${formatBRL(r.valorHora)}</td>
         <td class="valor">${s.percentualExtra}%</td><td class="valor">${formatBRL(r.valorExtra)}</td></tr>`;
     }).join('');
     corpoHtml = `
@@ -1370,7 +1387,7 @@ function gerarRelatorioPDF(){
       totalBruto += bruto;
       return `<tr>
         <td>${f.nome}</td><td class="valor">${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
-        <td>${minParaHora(r.extraMin)}</td><td class="valor">${formatBRL(r.valorExtra)}</td>
+        <td>${fmtExtras(r)}</td><td class="valor">${formatBRL(r.valorExtra)}</td>
         <td>${minParaHora(r.atrasoMin)}</td><td>${r.faltas}</td>
         <td class="valor"><b>${formatBRL(bruto)}</b></td>
         <td>${fechada?'Fechada':'Aberta'}</td>
