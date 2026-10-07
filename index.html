@@ -452,20 +452,22 @@ function renderDashboard(){
     </div>
     <div class="card">
       <h3 style="margin-top:0">🏆 Ranking de Horas Extras — ${nomeMes(mesAtual)}/${anoAtual}</h3>
+      <p style="color:var(--cinza);font-size:0.8rem;margin:-6px 0 14px">Saldo do mês (extras − atrasos). Em vermelho: colaboradores com saldo negativo.</p>
       ${(() => {
         const ranking = ativos.map(f=>{
           const r = calcularResumoMensal(f, anoAtual, mesAtual);
-          return {nome:f.nome, extraMin:r.extraMin};
-        }).sort((a,b)=> b.extraMin - a.extraMin);
+          return {nome:f.nome, saldoMin:r.extraMin - r.atrasoMin};
+        }).sort((a,b)=> b.saldoMin - a.saldoMin);
         if(ranking.length===0) return '<p style="color:var(--cinza)">Nenhum colaborador cadastrado.</p>';
-        const maior = Math.max(1, ranking[0].extraMin);
+        const maior = Math.max(1, ...ranking.map(i=>Math.abs(i.saldoMin)));
         return ranking.map((item,i)=>{
-          const pct = Math.max(2, (item.extraMin/maior)*100);
-          const cor = i===0 && item.extraMin>0 ? 'var(--amarelo)' : 'var(--azul)';
+          const neg = item.saldoMin<0;
+          const pct = Math.max(2, (Math.abs(item.saldoMin)/maior)*100);
+          const cor = neg ? 'var(--vermelho)' : (i===0 && item.saldoMin>0 ? 'var(--amarelo)' : 'var(--azul)');
           return `<div style="margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:3px">
-              <span>${i===0 && item.extraMin>0 ? '🥇 ' : ''}${item.nome}</span>
-              <span style="font-weight:600">${minParaHora(item.extraMin)}</span>
+              <span>${i===0 && item.saldoMin>0 ? '🥇 ' : ''}${item.nome}</span>
+              <span style="font-weight:600;color:${neg?'var(--vermelho)':'inherit'}">${neg?'-':''}${minParaHora(Math.abs(item.saldoMin))}</span>
             </div>
             <div style="background:#e2e8f0;border-radius:6px;height:10px;">
               <div style="background:${cor};width:${pct}%;height:10px;border-radius:6px;transition:width 0.4s"></div>
