@@ -604,6 +604,10 @@ setInterval(()=>{ if(viewAtual==='ponto') atualizarRelogioPonto(); }, 1000);
 async function registrarPonto(employeeId, tipo){
   const funcAlvo = dbGet('employees').find(e=>e.id===employeeId);
   if(!funcAlvo || funcAlvo.status!=='Ativo'){ alert('Este colaborador está inativo e não pode registrar ponto.'); renderPonto(); return; }
+  // Confere no banco (não só na tela, que pode estar desatualizada) para evitar marcação duplicada
+  const { data: existentes } = await sb.from('time_records').select('id').eq('employee_id', employeeId).eq('data', hojeISO()).eq('tipo', tipo).limit(1);
+  const jaMarcado = existentes && existentes.length>0;
+  if(jaMarcado){ alert(`"${tipo}" já foi registrada hoje para ${funcAlvo.nome}. A tela será atualizada.`); await carregarTudo(); renderPonto(); return; }
   if(!confirm(`Confirma registrar "${tipo}" para o colaborador ${funcAlvo.nome} às ${horaAgora()}?`)){ return; }
   const hora = horaAgora();
   const { data, error } = await sb.from('time_records')
@@ -758,12 +762,15 @@ function renderEspelho(){
     </tr>`;
   }
   const podeEditarCab = currentUser.role==='admin';
+  const compensadoEsp = Math.min(totalExtra, totalAtraso);
+  const extraLiqEsp = totalExtra - compensadoEsp, atrasoLiqEsp = totalAtraso - compensadoEsp;
   document.getElementById('espelhoTabela').innerHTML = `
     <div class="grid-cards">
       <div class="stat-card"><div class="num">${minParaHora(totalTrab)}</div><div class="label">Total trabalhado</div></div>
       <div class="stat-card"><div class="num">${minParaHora(totalPrev)}</div><div class="label">Total previsto</div></div>
-      <div class="stat-card"><div class="num" style="color:var(--verde)">${minParaHora(totalExtra)}</div><div class="label">Horas extras</div></div>
-      <div class="stat-card"><div class="num" style="color:var(--vermelho)">${minParaHora(totalAtraso)}</div><div class="label">Atrasos</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--verde)">${minParaHora(extraLiqEsp)}</div><div class="label">Horas extras (líquidas)</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--vermelho)">${minParaHora(atrasoLiqEsp)}</div><div class="label">Atrasos (líquidos)</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--azul)">${minParaHora(compensadoEsp)}</div><div class="label">Compensado (extras − atrasos)</div></div>
     </div>
     <div class="card" style="overflow-x:auto">
       <table>
@@ -918,8 +925,13 @@ function calcularResumoMensal(func, ano, mes){
   }
   const valorHora = func.salario / (func.cargaMensal||220);
   const valorMinuto = valorHora / 60;
+  // Banco de horas: as horas extras abatem os atrasos do mês (compensação)
+  const extraBrutoMin = extraMin, atrasoBrutoMin = atrasoMin;
+  const compensadoMin = Math.min(extraBrutoMin, atrasoBrutoMin);
+  extraMin = extraBrutoMin - compensadoMin;
+  atrasoMin = atrasoBrutoMin - compensadoMin;
   const valorExtra = extraMin * valorMinuto * (1 + (settings.percentualExtra||50)/100);
-  return {trabalhadoMin, abertoHojeMin, previstoMin, extraMin, atrasoMin, faltas, valorHora, valorMinuto, valorExtra};
+  return {trabalhadoMin, abertoHojeMin, previstoMin, extraMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, faltas, valorHora, valorMinuto, valorExtra};
 }
 
 function renderHorasExtras(){
@@ -950,14 +962,14 @@ function renderBancoHoras(){
     <h1>${isFunc?'Meu Banco de Horas':'Banco de Horas'}</h1>
     <div class="card">
       <table>
-        <thead><tr><th>Colaborador</th><th>Horas Trabalhadas</th><th>Horas Previstas</th><th>Saldo do Mês</th></tr></thead>
+        <thead><tr><th>Colaborador</th><th>Horas Trabalhadas</th><th>Horas Previstas</th><th>Compensado (extras − atrasos)</th><th>Saldo do Mês</th></tr></thead>
         <tbody>
           ${emp.map(f=>{
             const r = calcularResumoMensal(f, ano, mes);
             const saldo = (r.trabalhadoMin - r.abertoHojeMin) - r.previstoMin;
-            return `<tr><td>${f.nome}</td><td>${minParaHora(r.trabalhadoMin)}</td><td>${minParaHora(r.previstoMin)}</td>
+            return `<tr><td>${f.nome}</td><td>${minParaHora(r.trabalhadoMin)}</td><td>${minParaHora(r.previstoMin)}</td><td>${minParaHora(r.compensadoMin)}</td>
               <td style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'};font-weight:600">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>`;
-          }).join('') || '<tr><td colspan="4" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
+          }).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
         </tbody>
       </table>
     </div>
@@ -1052,7 +1064,8 @@ function abrirDetalhesFolha(employeeId, ano, mes){
         <tr><td>Horas previstas no período</td><td class="valor">${minParaHora(r.previstoMin)}</td></tr>
         <tr><td>Horas trabalhadas</td><td class="valor">${minParaHora(r.trabalhadoMin)}</td></tr>
         <tr><td>Saldo do período</td><td class="valor" style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'}">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>
-        <tr><td>Horas extras (${dbGet('settings').percentualExtra}%)</td><td class="valor">${minParaHora(r.extraMin)}</td></tr>
+        <tr><td>Compensado (extras abatendo atrasos)</td><td class="valor">${minParaHora(r.compensadoMin)}</td></tr>
+        <tr><td>Horas extras líquidas (${dbGet('settings').percentualExtra}%)</td><td class="valor">${minParaHora(r.extraMin)}</td></tr>
         <tr><td><b>Valor das horas extras</b></td><td class="valor"><b>${formatBRL(r.valorExtra)}</b></td></tr>
         <tr><td>Atrasos (minutos)</td><td class="valor">${minParaHora(r.atrasoMin)}</td></tr>
         <tr><td>Valor estimado do desconto por atraso</td><td class="valor">${formatBRL(descontoAtraso)}</td></tr>
