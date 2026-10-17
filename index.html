@@ -580,14 +580,37 @@ function renderPonto(){
   const regsHoje = dbGet('records').filter(r=>r.employeeId===alvo.id && r.date===hoje);
   const prox = proximoTipo(regsHoje);
   const trabalhadoMin = calcularTrabalhadoDia(regsHoje, hoje);
-  const previstoMin = horasPrevistasDia(alvo);
+  const ausHoje = ausenciaDoDia(alvo.id, hoje);
+  const ausJustHoje = ausHoje && ausHoje.tipo!=='Folga (banco de horas)';
+  const previstoMin = (ausJustHoje || ehDiaEspecial(hoje)) ? 0 : horasPrevistasDia(alvo);
   const saldo = trabalhadoMin - previstoMin;
+
+  // Avisos de férias/ausências do colaborador (hoje e próximas)
+  const diaSeguinte = iso => { const d = new Date(iso+'T12:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); };
+  const diasAte = iso => Math.round((new Date(iso+'T12:00:00') - new Date(hoje+'T12:00:00'))/86400000);
+  const proximasAus = dbGet('absences').filter(a=>a.employeeId===alvo.id && a.inicio>hoje).sort((a,b)=>a.inicio.localeCompare(b.inicio));
+  let avisosAus = '';
+  if(ausHoje){
+    const emFerias = ausHoje.tipo==='Férias';
+    avisosAus += `<div class="card" style="background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46;text-align:center;font-size:1.05rem">
+      ${emFerias?'🏖️':'📌'} <b>${alvo.nome}</b> ${emFerias?'está de <b>FÉRIAS</b>':`está em <b>${ausHoje.tipo.toUpperCase()}</b>`} hoje
+      <div style="font-size:0.9rem;margin-top:4px">Período: ${formatDataBR(ausHoje.inicio)} a ${formatDataBR(ausHoje.fim)} · Retorno em <b>${formatDataBR(diaSeguinte(ausHoje.fim))}</b>${ausHoje.obs?` · ${ausHoje.obs}`:''}</div>
+    </div>`;
+  }
+  proximasAus.forEach(a=>{
+    const n = diasAte(a.inicio);
+    avisosAus += `<div class="card" style="background:#eff6ff;border:1px solid #93c5fd;color:#1e40af;text-align:center">
+      📅 <b>${a.tipo}</b> programada${a.tipo==='Férias'?'s':''}: <b>${formatDataBR(a.inicio)} a ${formatDataBR(a.fim)}</b>
+      <span style="font-size:0.9rem">(${n===1?'começa amanhã':`faltam ${n} dias`})</span>
+    </div>`;
+  });
 
   const cores = {'Entrada':'var(--verde)','Saída Intervalo':'var(--amarelo)','Retorno':'var(--azul)','Saída':'var(--vermelho)'};
 
   document.getElementById('content').innerHTML = `
     <h1>Registrar Ponto</h1>
     ${empregadosSelect}
+    ${avisosAus}
     <div class="card ponto-central">
       <div style="font-weight:600;font-size:1.1rem;margin-bottom:2px">${alvo.nome}</div>
       <div class="hora" id="relogioPonto">--:--:--</div>
@@ -627,7 +650,9 @@ async function registrarPonto(employeeId, tipo){
   const { data: existentes } = await sb.from('time_records').select('id').eq('employee_id', employeeId).eq('data', hojeISO()).eq('tipo', tipo).limit(1);
   const jaMarcado = existentes && existentes.length>0;
   if(jaMarcado){ alert(`"${tipo}" já foi registrada hoje para ${funcAlvo.nome}. A tela será atualizada.`); await carregarTudo(); renderPonto(); return; }
-  if(!confirm(`Confirma registrar "${tipo}" para o colaborador ${funcAlvo.nome} às ${horaAgora()}?`)){ return; }
+  const ausAgora = ausenciaDoDia(employeeId, hojeISO());
+  const avisoAus = ausAgora ? `\n\n⚠️ Atenção: ${funcAlvo.nome} está em "${ausAgora.tipo}" de ${formatDataBR(ausAgora.inicio)} a ${formatDataBR(ausAgora.fim)}.` : '';
+  if(!confirm(`Confirma registrar "${tipo}" para o colaborador ${funcAlvo.nome} às ${horaAgora()}?${avisoAus}`)){ return; }
   const hora = horaAgora();
   const { data, error } = await sb.from('time_records')
     .insert({employee_id: employeeId, data: hojeISO(), tipo, hora, registrado_por: currentUser.nome})
