@@ -178,7 +178,7 @@ const SUPABASE_KEY = 'sb_publishable_NA6OZSV9539QjnkKc9engg_Hshq1Jf-';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* Estado local (cache em memória, sincronizado com o Supabase) */
-let state = { employees:[], records:[], holidays:[], settings:{}, corrections:[], audit:[], closures:[] };
+let state = { employees:[], records:[], holidays:[], settings:{}, corrections:[], audit:[], closures:[], absences:[] };
 function dbGet(key){ return state[key] !== undefined ? state[key] : (key==='settings' ? {} : []); }
 function dbSet(key,val){ state[key] = val; }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
@@ -209,7 +209,7 @@ function mapSettingsFromDB(row){
 
 /* Carrega todas as tabelas do Supabase para o estado local */
 async function carregarTudo(){
-  const [empRes, recRes, holRes, setRes, corRes, audRes, cloRes, usrRes] = await Promise.all([
+  const [empRes, recRes, holRes, setRes, corRes, audRes, cloRes, usrRes, ausRes] = await Promise.all([
     sb.from('employees').select('*').order('nome'),
     sb.from('time_records').select('*'),
     sb.from('holidays').select('*'),
@@ -218,6 +218,7 @@ async function carregarTudo(){
     sb.from('audit_log').select('*').order('created_at', {ascending:false}),
     sb.from('closures').select('*'),
     sb.from('profiles').select('*, employees(nome)'),
+    sb.from('absences').select('*').order('data_inicio', {ascending:false}),
   ]);
   state.employees = (empRes.data||[]).map(mapEmployeeFromDB);
   state.records = (recRes.data||[]).map(mapRecordFromDB);
@@ -226,6 +227,7 @@ async function carregarTudo(){
   state.corrections = (corRes.data||[]).map(mapCorrectionFromDB);
   state.audit = (audRes.data||[]).map(a=>({data:a.created_at, usuario:a.usuario_nome, acao:a.acao}));
   state.closures = (cloRes.data||[]).map(c=>({employeeId:c.employee_id, ano:c.ano, mes:c.mes, fechadoPor:c.fechado_por, data:c.fechado_em}));
+  state.absences = (ausRes.data||[]).map(a=>({id:a.id, employeeId:a.employee_id, tipo:a.tipo, inicio:a.data_inicio, fim:a.data_fim, obs:a.observacao||'', criadoPor:a.criado_por||''}));
   state.usuarios = (usrRes.data||[]).map(u=>({id:u.id, nome:u.nome, role:u.role, employeeId:u.employee_id, employeeNome:u.employees?u.employees.nome:null}));
 }
 
@@ -277,6 +279,10 @@ function calcularTrabalhadoDia(regsDoDia, dataISO){
   return total;
 }
 
+const TIPOS_AUSENCIA = ['Férias','Folga (banco de horas)','Atestado médico','Falta justificada','Outro'];
+function ausenciaDoDia(employeeId, dataISO){
+  return dbGet('absences').find(a=>a.employeeId===employeeId && dataISO>=a.inicio && dataISO<=a.fim) || null;
+}
 function ehDiaEspecial(dataISO){
   // Domingo ou feriado: horas trabalhadas pagas com o adicional de domingo/feriado (100%)
   const dow = new Date(dataISO+'T12:00:00').getDay();
@@ -349,12 +355,12 @@ const MENUS = {
   admin:[['dashboard','📊 Dashboard'],['ponto','🕐 Registrar Ponto'],['colaboradores','👥 Colaboradores'],
     ['espelho','📋 Espelho de Ponto'],['horasextras','⏱ Horas Extras'],['bancohoras','🏦 Banco de Horas'],
     ['atrasos','⚠️ Atrasos e Faltas'],['folha','💰 Folha'],['relatorios','📁 Relatórios'],
-    ['feriados','📅 Feriados'],['correcoes','✏️ Correções'],['usuarios','👤 Usuários e Acessos'],
+    ['feriados','📅 Feriados'],['ausencias','🏖️ Férias e Ausências'],['correcoes','✏️ Correções'],['usuarios','👤 Usuários e Acessos'],
     ['auditoria','🔍 Auditoria'],['config','⚙️ Configurações']],
   rh:[['dashboard','📊 Dashboard'],['ponto','🕐 Registrar Ponto'],['colaboradores','👥 Colaboradores'],
     ['espelho','📋 Espelho de Ponto'],['horasextras','⏱ Horas Extras'],['bancohoras','🏦 Banco de Horas'],
     ['atrasos','⚠️ Atrasos e Faltas'],['folha','💰 Folha'],['relatorios','📁 Relatórios'],
-    ['feriados','📅 Feriados'],['correcoes','✏️ Correções']],
+    ['feriados','📅 Feriados'],['ausencias','🏖️ Férias e Ausências'],['correcoes','✏️ Correções']],
   funcionario:[['ponto','🕐 Registrar Ponto'],['espelho','📋 Meu Espelho'],['bancohoras','🏦 Meu Banco de Horas'],
     ['correcoes','✏️ Solicitar Correção']],
   ponto:[['ponto','🕐 Registrar Ponto']]
@@ -386,7 +392,7 @@ function navegar(view){
     dashboard: renderDashboard, ponto: renderPonto, colaboradores: renderColaboradores,
     espelho: renderEspelho, horasextras: renderHorasExtras, bancohoras: renderBancoHoras,
     atrasos: renderAtrasos, folha: renderFolha, relatorios: renderRelatorios,
-    feriados: renderFeriados, correcoes: renderCorrecoes, auditoria: renderAuditoria, config: renderConfig, usuarios: renderUsuarios
+    feriados: renderFeriados, ausencias: renderAusencias, correcoes: renderCorrecoes, auditoria: renderAuditoria, config: renderConfig, usuarios: renderUsuarios
   };
   (renderers[view] || renderDashboard)();
 }
@@ -404,11 +410,11 @@ function abrirDetalheDashboard(tipo){
   const tol = dbGet('settings').toleranciaAtraso||0;
   const mes = new Date().getMonth(), ano = new Date().getFullYear();
   const fechadasIds = new Set(dbGet('closures').filter(c=>c.ano===ano && c.mes===mes).map(c=>c.employeeId));
-  let titulo='', linhas=[];
+  let titulo='', linhas=[], justif=[];
   const hh = h => String(h).slice(0,5);
   if(tipo==='ativos'){ titulo='Funcionários ativos'; linhas = ativos.map(f=>[f.nome, f.cargo||'']); }
   else if(tipo==='presentes'){ titulo='Presentes hoje'; linhas = ativos.filter(f=>entrada(f)).map(f=>[f.nome, 'Entrada às '+hh(entrada(f).hora)]); }
-  else if(tipo==='ausentes'){ titulo='Ausentes hoje'; linhas = ativos.filter(f=>!entrada(f)).map(f=>[f.nome, 'Sem marcação hoje']); }
+  else if(tipo==='ausentes'){ titulo='Ausentes hoje'; linhas = ativos.filter(f=>!entrada(f) && !ausenciaDoDia(f.id,hoje)).map(f=>[f.nome, 'Sem marcação hoje']); justif = ativos.filter(f=>!entrada(f) && ausenciaDoDia(f.id,hoje)).map(f=>[f.nome, ausenciaDoDia(f.id,hoje).tipo]); }
   else if(tipo==='atrasos'){ titulo='Atrasos hoje'; linhas = ativos.filter(f=>{const e=entrada(f); return !ehDiaEspecial(hoje) && e && horaParaMin(e.hora) > horaParaMin(f.jornada.entrada)+tol;}).map(f=>[f.nome, `Entrada às ${hh(entrada(f).hora)} (prevista ${hh(f.jornada.entrada)})`]); }
   else if(tipo==='extras'){ titulo='Horas extras (mês)'; linhas = ativos.map(f=>[f.nome, minParaHora(calcularResumoMensal(f,ano,mes).extraTotalMin)]); }
   else if(tipo==='trabalhadas'){ titulo='Horas trabalhadas (mês)'; linhas = ativos.map(f=>[f.nome, minParaHora(calcularResumoMensal(f,ano,mes).trabalhadoMin)]); }
@@ -417,6 +423,7 @@ function abrirDetalheDashboard(tipo){
   document.getElementById('modalBox').innerHTML = `
     <h2>${titulo} (${linhas.length})</h2>
     ${linhas.length ? `<table><tbody>${linhas.map(l=>`<tr><td>${l[0]}</td><td style="color:var(--cinza);text-align:right">${l[1]}</td></tr>`).join('')}</tbody></table>` : '<p style="color:var(--cinza)">Nenhum colaborador nesta lista.</p>'}
+    ${justif.length?`<h3 style="margin:16px 0 6px">Ausência justificada hoje (${justif.length})</h3><table><tbody>${justif.map(l=>`<tr><td>${l[0]}</td><td style="color:var(--cinza);text-align:right">${l[1]}</td></tr>`).join('')}</tbody></table>`:''}
     <div class="modal-acoes"><button class="btn btn-cinza" onclick="fecharModal()">Fechar</button></div>
   `;
   abrirModal();
@@ -428,7 +435,7 @@ function renderDashboard(){
   const hoje = hojeISO();
   const records = dbGet('records').filter(r=>r.date===hoje);
   const presentesIds = new Set(records.filter(r=>r.tipo==='Entrada').map(r=>r.employeeId));
-  const ausentes = ativos.length - presentesIds.size;
+  const ausentes = ativos.filter(f=>!presentesIds.has(f.id) && !ausenciaDoDia(f.id, hoje)).length;
   let atrasosHoje = 0;
   const hojeEspecial = ehDiaEspecial(hoje);
   ativos.forEach(f=>{
@@ -466,7 +473,7 @@ function renderDashboard(){
       ${(() => {
         const ranking = ativos.map(f=>{
           const r = calcularResumoMensal(f, anoAtual, mesAtual);
-          return {nome:f.nome, saldoMin:r.extraTotalMin - r.atrasoMin};
+          return {nome:f.nome, saldoMin:r.extraTotalMin - r.atrasoMin - r.folgaSemSaldoMin};
         }).sort((a,b)=> b.saldoMin - a.saldoMin);
         if(ranking.length===0) return '<p style="color:var(--cinza)">Nenhum colaborador cadastrado.</p>';
         const maior = Math.max(1, ...ranking.map(i=>Math.abs(i.saldoMin)));
@@ -741,7 +748,7 @@ function renderEspelho(){
   const dias = new Date(ano, mes+1, 0).getDate();
   const records = dbGet('records').filter(r=>r.employeeId===func.id);
   const holidays = new Set(dbGet('holidays').map(h=>h.data));
-  let totalTrab=0, totalPrev=0, totalExtra=0, totalAtraso=0, totalDom=0;
+  let totalTrab=0, totalPrev=0, totalExtra=0, totalAtraso=0, totalDom=0, totalFolga=0;
   let linhas = '';
   for(let d=1; d<=dias; d++){
     const dataISO = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -751,7 +758,9 @@ function renderEspelho(){
     const isHoliday = holidays.has(dataISO);
     const isDomingo = new Date(dataISO+'T12:00:00').getDay()===0;
     const diaEspecial = isHoliday || isDomingo;
-    const prevMin = diaEspecial ? 0 : horasPrevistasDia(func);
+    const aus = ausenciaDoDia(func.id, dataISO);
+    const ausJustificada = aus && aus.tipo!=='Folga (banco de horas)';
+    const prevMin = (diaEspecial || ausJustificada) ? 0 : horasPrevistasDia(func);
     const extraMin = diaEspecial ? 0 : Math.max(0, trabMin - prevMin);
     const domingoDia = diaEspecial ? trabMin : 0;
     let atrasoMin = 0;
@@ -762,11 +771,12 @@ function renderEspelho(){
       if(tipos['Saída']) atrasoMin = Math.min(atrasoMin, Math.max(0, prevMin - trabMin));
     }
     totalTrab += trabMin; totalPrev += prevMin; totalExtra += extraMin; totalAtraso += atrasoMin; totalDom += domingoDia;
-    if(regsDia.length===0 && prevMin===0 && !isDomingo && !isHoliday) continue;
+    if(aus && !ausJustificada && !diaEspecial && dataISO<=hojeISO()) totalFolga += Math.max(0, prevMin - trabMin);
+    if(regsDia.length===0 && prevMin===0 && !isDomingo && !isHoliday && !aus) continue;
     const podeEditar = currentUser.role==='admin';
     const temRegistro = regsDia.length>0;
     linhas += `<tr>
-      <td>${String(d).padStart(2,'0')}/${String(mes+1).padStart(2,'0')} ${isHoliday?'<span class="badge badge-amarelo">Feriado</span>':''}${isDomingo?' <span class="badge badge-amarelo">Domingo</span>':''}</td>
+      <td>${String(d).padStart(2,'0')}/${String(mes+1).padStart(2,'0')} ${isHoliday?'<span class="badge badge-amarelo">Feriado</span>':''}${isDomingo?' <span class="badge badge-amarelo">Domingo</span>':''}${aus?` <span class="badge badge-verde" title="${(aus.obs||'').replace(/"/g,'')}">${aus.tipo}</span>`:''}</td>
       <td>${tipos['Entrada']||'-'}</td><td>${tipos['Saída Intervalo']||'-'}</td>
       <td>${tipos['Retorno']||'-'}</td><td>${tipos['Saída']||'-'}</td>
       <td>${minParaHora(trabMin)}</td><td>${minParaHora(prevMin)}</td>
@@ -779,8 +789,10 @@ function renderEspelho(){
     </tr>`;
   }
   const podeEditarCab = currentUser.role==='admin';
-  const compensadoEsp = Math.min(totalExtra, totalAtraso);
-  const extraLiqEsp = totalExtra - compensadoEsp, atrasoLiqEsp = totalAtraso - compensadoEsp;
+  const folgaCompEsp = Math.min(totalExtra, totalFolga);
+  const compAtrasoEsp = Math.min(totalExtra - folgaCompEsp, totalAtraso);
+  const compensadoEsp = folgaCompEsp + compAtrasoEsp;
+  const extraLiqEsp = totalExtra - compensadoEsp, atrasoLiqEsp = totalAtraso - compAtrasoEsp;
   document.getElementById('espelhoTabela').innerHTML = `
     <div class="grid-cards">
       <div class="stat-card"><div class="num">${minParaHora(totalTrab)}</div><div class="label">Total trabalhado</div></div>
@@ -789,6 +801,7 @@ function renderEspelho(){
       <div class="stat-card"><div class="num" style="color:var(--vermelho)">${minParaHora(atrasoLiqEsp)}</div><div class="label">Atrasos (líquidos)</div></div>
       <div class="stat-card"><div class="num" style="color:var(--azul)">${minParaHora(compensadoEsp)}</div><div class="label">Compensado (extras − atrasos)</div></div>
       <div class="stat-card"><div class="num" style="color:var(--verde)">${minParaHora(totalDom)}</div><div class="label">Domingos/feriados (100%)</div></div>
+      ${totalFolga>0?`<div class="stat-card"><div class="num" style="color:var(--azul)">${minParaHora(totalFolga)}</div><div class="label">Folgas do banco de horas (${minParaHora(totalFolga-folgaCompEsp)} sem saldo)</div></div>`:''}
     </div>
     <div class="card" style="overflow-x:auto">
       <table>
@@ -919,7 +932,7 @@ function calcularResumoMensal(func, ano, mes){
   const records = dbGet('records').filter(r=>r.employeeId===func.id);
   const holidays = new Set(dbGet('holidays').map(h=>h.data));
   const settings = dbGet('settings');
-  let trabalhadoMin=0, previstoMin=0, extraMin=0, atrasoMin=0, faltas=0, abertoHojeMin=0, domingoMin=0;
+  let trabalhadoMin=0, previstoMin=0, extraMin=0, atrasoMin=0, faltas=0, abertoHojeMin=0, domingoMin=0, folgaBancoMin=0;
   const hojeStr = hojeISO();
   for(let d=1; d<=dias; d++){
     const dataISO = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -929,20 +942,25 @@ function calcularResumoMensal(func, ano, mes){
     const isHoliday = holidays.has(dataISO);
     const diaSemana = new Date(dataISO+'T12:00:00').getDay();
     const diaEspecial = isHoliday || diaSemana===0;
-    const prevDia = diaEspecial ? 0 : horasPrevistasDia(func);
+    const aus = ausenciaDoDia(func.id, dataISO);
+    const ausJustificada = aus && aus.tipo!=='Folga (banco de horas)';
+    const prevDia = (diaEspecial || ausJustificada) ? 0 : horasPrevistasDia(func);
     const trabDia = calcularTrabalhadoDia(regsDia, dataISO);
     // Hoje sem Saída: dia ainda em andamento, fica fora do saldo e das extras
     const emAndamento = (dataISO===hojeStr && tipos['Entrada'] && !tipos['Saída']);
     trabalhadoMin += trabDia;
     if(emAndamento){ abertoHojeMin = trabDia; }
     else if(diaEspecial){ domingoMin += trabDia; }
-    else { previstoMin += prevDia; extraMin += Math.max(0, trabDia - prevDia); }
+    else {
+      previstoMin += prevDia; extraMin += Math.max(0, trabDia - prevDia);
+      if(aus && !ausJustificada) folgaBancoMin += Math.max(0, prevDia - trabDia);
+    }
     if(tipos['Entrada'] && !diaEspecial){
       let atrasoDia = Math.max(0, horaParaMin(tipos['Entrada']) - horaParaMin(func.jornada.entrada) - (settings.toleranciaAtraso||0));
       // Dia encerrado: se compensou no mesmo dia (saiu mais tarde), o atraso é só o que realmente faltou
       if(tipos['Saída']) atrasoDia = Math.min(atrasoDia, Math.max(0, prevDia - trabDia));
       atrasoMin += atrasoDia;
-    } else if(prevDia>0 && diaSemana!==0 && diaSemana!==6){
+    } else if(prevDia>0 && diaSemana!==0 && diaSemana!==6 && !aus){
       faltas++;
     }
   }
@@ -950,12 +968,16 @@ function calcularResumoMensal(func, ano, mes){
   const valorMinuto = valorHora / 60;
   // Banco de horas: as horas extras abatem os atrasos do mês (compensação)
   const extraBrutoMin = extraMin, atrasoBrutoMin = atrasoMin;
-  const compensadoMin = Math.min(extraBrutoMin, atrasoBrutoMin);
+  // Folgas programadas abatem primeiro; o que sobrar das extras abate os atrasos
+  const folgaCompensadaMin = Math.min(extraBrutoMin, folgaBancoMin);
+  const compAtrasoMin = Math.min(extraBrutoMin - folgaCompensadaMin, atrasoBrutoMin);
+  const compensadoMin = folgaCompensadaMin + compAtrasoMin;
+  const folgaSemSaldoMin = folgaBancoMin - folgaCompensadaMin;
   extraMin = extraBrutoMin - compensadoMin;
-  atrasoMin = atrasoBrutoMin - compensadoMin;
+  atrasoMin = atrasoBrutoMin - compAtrasoMin;
   const valorExtra = extraMin * valorMinuto * (1 + (settings.percentualExtra||50)/100)
     + domingoMin * valorMinuto * (1 + (settings.percentualExtraFeriado||100)/100);
-  return {trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraMin+domingoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, faltas, valorHora, valorMinuto, valorExtra};
+  return {trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraMin+domingoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, folgaBancoMin, folgaCompensadaMin, folgaSemSaldoMin, faltas, valorHora, valorMinuto, valorExtra};
 }
 
 function renderHorasExtras(){
@@ -990,7 +1012,7 @@ function renderBancoHoras(){
         <tbody>
           ${emp.map(f=>{
             const r = calcularResumoMensal(f, ano, mes);
-            const saldo = (r.trabalhadoMin - r.abertoHojeMin) - r.previstoMin;
+            const saldo = (r.trabalhadoMin - r.abertoHojeMin - r.domingoMin) - r.previstoMin;
             return `<tr><td>${f.nome}</td><td>${minParaHora(r.trabalhadoMin)}</td><td>${minParaHora(r.previstoMin)}</td><td>${minParaHora(r.compensadoMin)}</td>
               <td style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'};font-weight:600">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>`;
           }).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
@@ -1071,7 +1093,7 @@ function abrirDetalhesFolha(employeeId, ano, mes){
   const r = calcularResumoMensal(f, ano, mes);
   const closures = dbGet('closures');
   const fechamento = closures.find(c=>c.employeeId===employeeId && c.ano===ano && c.mes===mes);
-  const saldo = (r.trabalhadoMin - r.abertoHojeMin) - r.previstoMin;
+  const saldo = (r.trabalhadoMin - r.abertoHojeMin - r.domingoMin) - r.previstoMin;
   const descontoAtraso = r.atrasoMin * r.valorMinuto;
   const horasDiaPrevistas = horasPrevistasDia(f);
   const descontoFaltas = r.faltas * (horasDiaPrevistas * r.valorMinuto);
@@ -1428,6 +1450,65 @@ function gerarRelatorioPDF(){
       </div>
     </div>
   `;
+}
+
+function renderAusencias(){
+  const ativos = dbGet('employees').filter(e=>e.status==='Ativo');
+  const hoje = hojeISO();
+  const lista = [...dbGet('absences')].sort((a,b)=>b.inicio.localeCompare(a.inicio));
+  const nomeDe = id => (dbGet('employees').find(e=>e.id===id)||{}).nome || '—';
+  const dias = a => Math.round((new Date(a.fim+'T12:00:00') - new Date(a.inicio+'T12:00:00'))/86400000)+1;
+  const situacao = a => a.fim<hoje ? 'Concluída' : (a.inicio>hoje ? 'Programada' : 'Em andamento');
+  document.getElementById('content').innerHTML = `
+    <h1>Férias e Ausências</h1>
+    <div class="card">
+      <h3 style="margin-top:0">Programar férias ou justificar ausência</h3>
+      <div class="form-grid">
+        <div><label>Colaborador</label><select id="ausFunc">${ativos.map(e=>`<option value="${e.id}">${e.nome}</option>`).join('')}</select></div>
+        <div><label>Tipo</label><select id="ausTipo">${TIPOS_AUSENCIA.map(t=>`<option>${t}</option>`).join('')}</select></div>
+        <div><label>Data inicial</label><input type="date" id="ausIni"></div>
+        <div><label>Data final</label><input type="date" id="ausFim"></div>
+      </div>
+      <label>Observação (opcional)</label><input id="ausObs" placeholder="ex: férias de 30 dias, folga combinada com a gerência">
+      <div class="aviso" style="margin-top:12px">
+        <b>Férias, Atestado, Falta justificada e Outro:</b> o dia não tem horas previstas, não gera falta nem desconto.<br>
+        <b>Folga (banco de horas):</b> o dia continua previsto e as horas são abatidas das horas extras do mês. O que não tiver saldo fica negativo no banco de horas.
+      </div>
+      <div style="margin-top:12px"><button class="btn btn-azul" onclick="salvarAusencia()">+ Salvar</button></div>
+    </div>
+    <div class="card" style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Colaborador</th><th>Tipo</th><th>Período</th><th>Dias</th><th>Situação</th><th>Observação</th><th></th></tr></thead>
+        <tbody>${lista.map(a=>`<tr><td>${nomeDe(a.employeeId)}</td><td>${a.tipo}</td>
+          <td>${formatDataBR(a.inicio)} a ${formatDataBR(a.fim)}</td><td>${dias(a)}</td><td>${situacao(a)}</td><td>${a.obs||''}</td>
+          <td><button class="icon-btn del" onclick="excluirAusencia('${a.id}')">Excluir</button></td></tr>`).join('') || '<tr><td colspan="7" style="color:var(--cinza)">Nenhuma ausência cadastrada.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+async function salvarAusencia(){
+  const employeeId = val('ausFunc'), tipo = val('ausTipo'), ini = val('ausIni'), fim = val('ausFim'), obs = val('ausObs').trim();
+  if(!employeeId || !ini || !fim){ alert('Preencha colaborador, data inicial e data final.'); return; }
+  if(fim < ini){ alert('A data final não pode ser anterior à data inicial.'); return; }
+  const conflito = dbGet('absences').find(a=>a.employeeId===employeeId && ini<=a.fim && fim>=a.inicio);
+  if(conflito){ alert(`Já existe "${conflito.tipo}" de ${formatDataBR(conflito.inicio)} a ${formatDataBR(conflito.fim)} para este colaborador no mesmo período. Exclua ou ajuste antes de lançar outra.`); return; }
+  const { data, error } = await sb.from('absences').insert({employee_id:employeeId, tipo, data_inicio:ini, data_fim:fim, observacao:obs||null, criado_por:currentUser.nome}).select().single();
+  if(error){ alert('Erro ao salvar: '+error.message); return; }
+  state.absences.push({id:data.id, employeeId, tipo, inicio:ini, fim, obs, criadoPor:currentUser.nome});
+  const f = dbGet('employees').find(e=>e.id===employeeId);
+  logAudit(`${tipo} lançada para ${f?f.nome:employeeId}: ${formatDataBR(ini)} a ${formatDataBR(fim)}${obs?' ('+obs+')':''}`);
+  renderAusencias();
+}
+async function excluirAusencia(id){
+  const a = dbGet('absences').find(x=>x.id===id); if(!a) return;
+  const f = dbGet('employees').find(e=>e.id===a.employeeId);
+  if(!confirm(`Excluir "${a.tipo}" de ${f?f.nome:''} (${formatDataBR(a.inicio)} a ${formatDataBR(a.fim)})?`)) return;
+  const { error } = await sb.from('absences').delete().eq('id', id);
+  if(error){ alert('Erro ao excluir: '+error.message); return; }
+  state.absences = state.absences.filter(x=>x.id!==id);
+  logAudit(`${a.tipo} excluída de ${f?f.nome:a.employeeId}: ${formatDataBR(a.inicio)} a ${formatDataBR(a.fim)}`);
+  renderAusencias();
 }
 
 function renderFeriados(){
