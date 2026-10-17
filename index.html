@@ -777,8 +777,10 @@ function renderEspelho(){
     const temRegistro = regsDia.length>0;
     linhas += `<tr>
       <td>${String(d).padStart(2,'0')}/${String(mes+1).padStart(2,'0')} ${isHoliday?'<span class="badge badge-amarelo">Feriado</span>':''}${isDomingo?' <span class="badge badge-amarelo">Domingo</span>':''}${aus?` <span class="badge badge-verde" title="${(aus.obs||'').replace(/"/g,'')}">${aus.tipo}</span>`:''}</td>
-      <td>${tipos['Entrada']||'-'}</td><td>${tipos['Saída Intervalo']||'-'}</td>
-      <td>${tipos['Retorno']||'-'}</td><td>${tipos['Saída']||'-'}</td>
+      ${(aus && regsDia.length===0)
+        ? `<td colspan="4" style="text-align:center;font-weight:700;letter-spacing:.5px;background:#ecfdf5;color:#047857">${aus.tipo==='Férias'?'🏖️ ':''}${aus.tipo.toUpperCase()}</td>`
+        : `<td>${tipos['Entrada']||'-'}</td><td>${tipos['Saída Intervalo']||'-'}</td>
+      <td>${tipos['Retorno']||'-'}</td><td>${tipos['Saída']||'-'}</td>`}
       <td>${minParaHora(trabMin)}</td><td>${minParaHora(prevMin)}</td>
       <td style="color:var(--verde)">${domingoDia>0?`${minParaHora(domingoDia)} <small>(100%)</small>`:(extraMin>0?minParaHora(extraMin):'-')}</td>
       <td style="color:var(--vermelho)">${atrasoMin>0?minParaHora(atrasoMin):'-'}</td>
