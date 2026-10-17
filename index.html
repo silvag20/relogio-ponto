@@ -178,7 +178,7 @@ const SUPABASE_KEY = 'sb_publishable_NA6OZSV9539QjnkKc9engg_Hshq1Jf-';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* Estado local (cache em memória, sincronizado com o Supabase) */
-let state = { employees:[], records:[], holidays:[], settings:{}, corrections:[], audit:[], closures:[], absences:[] };
+let state = { employees:[], records:[], holidays:[], settings:{}, corrections:[], audit:[], closures:[], absences:[], pins:[] };
 function dbGet(key){ return state[key] !== undefined ? state[key] : (key==='settings' ? {} : []); }
 function dbSet(key,val){ state[key] = val; }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
@@ -228,6 +228,7 @@ async function carregarTudo(){
   state.audit = (audRes.data||[]).map(a=>({data:a.created_at, usuario:a.usuario_nome, acao:a.acao}));
   state.closures = (cloRes.data||[]).map(c=>({employeeId:c.employee_id, ano:c.ano, mes:c.mes, fechadoPor:c.fechado_por, data:c.fechado_em}));
   state.absences = (ausRes.data||[]).map(a=>({id:a.id, employeeId:a.employee_id, tipo:a.tipo, inicio:a.data_inicio, fim:a.data_fim, obs:a.observacao||'', criadoPor:a.criado_por||''}));
+  try{ const pr = await sb.rpc('employees_with_pin'); state.pins = Array.isArray(pr.data) ? pr.data : []; }catch(e){ state.pins = []; }
   state.usuarios = (usrRes.data||[]).map(u=>({id:u.id, nome:u.nome, role:u.role, employeeId:u.employee_id, employeeNome:u.employees?u.employees.nome:null}));
 }
 
@@ -247,7 +248,7 @@ function minParaHora(min){
   const h = Math.floor(min/60), m = min%60;
   return (neg?'-':'')+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 }
-function hojeISO(){ return new Date().toISOString().slice(0,10); }
+function hojeISO(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function horaAgora(){ return new Date().toTimeString().slice(0,5); }
 function nomeMes(m){ return ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][m]; }
 function formatBRL(v){ return 'R$ '+ (v||0).toFixed(2).replace('.',','); }
@@ -643,24 +644,108 @@ function atualizarRelogioPonto(){
 }
 setInterval(()=>{ if(viewAtual==='ponto') atualizarRelogioPonto(); }, 1000);
 
-async function registrarPonto(employeeId, tipo){
+function registrarPonto(employeeId, tipo){
   const funcAlvo = dbGet('employees').find(e=>e.id===employeeId);
   if(!funcAlvo || funcAlvo.status!=='Ativo'){ alert('Este colaborador está inativo e não pode registrar ponto.'); renderPonto(); return; }
-  // Confere no banco (não só na tela, que pode estar desatualizada) para evitar marcação duplicada
-  const { data: existentes } = await sb.from('time_records').select('id').eq('employee_id', employeeId).eq('data', hojeISO()).eq('tipo', tipo).limit(1);
-  const jaMarcado = existentes && existentes.length>0;
-  if(jaMarcado){ alert(`"${tipo}" já foi registrada hoje para ${funcAlvo.nome}. A tela será atualizada.`); await carregarTudo(); renderPonto(); return; }
+  const ehProprio = currentUser.role==='funcionario';
+  const temPin = (state.pins||[]).includes(employeeId);
   const ausAgora = ausenciaDoDia(employeeId, hojeISO());
-  const avisoAus = ausAgora ? `\n\n⚠️ Atenção: ${funcAlvo.nome} está em "${ausAgora.tipo}" de ${formatDataBR(ausAgora.inicio)} a ${formatDataBR(ausAgora.fim)}.` : '';
-  if(!confirm(`Confirma registrar "${tipo}" para o colaborador ${funcAlvo.nome} às ${horaAgora()}?${avisoAus}`)){ return; }
+  const avisoAus = ausAgora ? `<div class="aviso" style="margin:10px 0">⚠️ ${funcAlvo.nome} está em <b>${ausAgora.tipo}</b> de ${formatDataBR(ausAgora.inicio)} a ${formatDataBR(ausAgora.fim)}.</div>` : '';
+  document.getElementById('modalBox').innerHTML = `
+    <h2>Confirmar registro de ponto</h2>
+    <p style="font-size:1.05rem;margin:6px 0">Registrar <b>${tipo}</b> para <b>${funcAlvo.nome}</b> às <b>${horaAgora()}</b>?</p>
+    ${avisoAus}
+    ${(!ehProprio && temPin) ? `
+      <label>Digite a senha de ponto de ${funcAlvo.nome}</label>
+      <input id="pontoPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Senha" style="font-size:1.2rem;letter-spacing:4px"
+        onkeydown="if(event.key==='Enter') confirmarPonto('${employeeId}','${tipo}')">`
+      : (!ehProprio ? `<div class="aviso" style="margin:10px 0">⚠️ Este colaborador ainda não tem senha de ponto cadastrada. Peça ao administrador/RH para cadastrar.</div>` : '')}
+    <div class="modal-acoes">
+      <button class="btn btn-cinza" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-verde" id="btnConfirmarPonto" onclick="confirmarPonto('${employeeId}','${tipo}')">Confirmar</button>
+    </div>
+  `;
+  abrirModal();
+  setTimeout(()=>{ const i=document.getElementById('pontoPin'); if(i) i.focus(); }, 50);
+}
+
+async function confirmarPonto(employeeId, tipo){
+  const funcAlvo = dbGet('employees').find(e=>e.id===employeeId);
+  const ehProprio = currentUser.role==='funcionario';
+  const temPin = (state.pins||[]).includes(employeeId);
+  const pinEl = document.getElementById('pontoPin');
+  const pin = pinEl ? pinEl.value.trim() : '';
+  if(!ehProprio && temPin && !pin){ alert('Digite a senha de ponto do colaborador.'); return; }
+  const btn = document.getElementById('btnConfirmarPonto'); if(btn) btn.disabled = true;
   const hora = horaAgora();
-  const { data, error } = await sb.from('time_records')
-    .insert({employee_id: employeeId, data: hojeISO(), tipo, hora, registrado_por: currentUser.nome})
-    .select().single();
+  const { data, error } = await sb.rpc('registrar_ponto', {
+    p_employee_id: employeeId, p_tipo: tipo, p_data: hojeISO(), p_hora: hora,
+    p_pin: pin || null, p_registrado_por: currentUser.nome
+  });
+  if(btn) btn.disabled = false;
   if(error){ alert('Erro ao registrar ponto: '+error.message); return; }
-  state.records.push(mapRecordFromDB(data));
-  logAudit(`Registro de ponto: ${tipo} para ${dbGet('employees').find(e=>e.id===employeeId)?.nome} às ${hora}`);
+  if(!data || !data.ok){
+    const msgs = {
+      PIN_INVALIDO: 'Senha incorreta. Confira se você selecionou o seu nome e tente novamente.',
+      PIN_BLOQUEADO: 'Muitas tentativas erradas. Aguarde 5 minutos e tente novamente.',
+      COLABORADOR_INATIVO: 'Este colaborador está inativo e não pode registrar ponto.',
+      SEM_PERMISSAO: 'Seu perfil não tem permissão para registrar este ponto.',
+      TIPO_INVALIDO: 'Tipo de marcação inválido.',
+      NAO_AUTENTICADO: 'Sua sessão expirou. Saia e entre novamente.'
+    };
+    if(data && data.erro==='JA_REGISTRADO'){
+      fecharModal();
+      alert(`"${tipo}" já foi registrada hoje para ${funcAlvo?funcAlvo.nome:''}. A tela será atualizada.`);
+      await carregarTudo(); renderPonto(); return;
+    }
+    if(pinEl && data && data.erro==='PIN_INVALIDO'){ pinEl.value=''; pinEl.focus(); }
+    alert((data && msgs[data.erro]) || 'Não foi possível registrar o ponto.');
+    return;
+  }
+  fecharModal();
+  state.records.push(mapRecordFromDB(data.registro));
+  logAudit(`Registro de ponto: ${tipo} para ${funcAlvo?funcAlvo.nome:employeeId} às ${hora}`);
   renderPonto();
+}
+
+function abrirModalSenha(employeeId){
+  const e = dbGet('employees').find(x=>x.id===employeeId); if(!e) return;
+  const tem = (state.pins||[]).includes(employeeId);
+  document.getElementById('modalBox').innerHTML = `
+    <h2>Senha de ponto — ${e.nome}</h2>
+    <p style="color:var(--cinza);font-size:0.9rem;margin-top:-8px">${tem?'Já existe uma senha cadastrada. Informar uma nova substitui a anterior.':'Este colaborador ainda não tem senha de ponto.'}</p>
+    <div class="form-grid">
+      <div><label>Nova senha (4 a 8 números)</label><input id="pinNovo" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></div>
+      <div><label>Repita a senha</label><input id="pinNovo2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></div>
+    </div>
+    <div class="aviso" style="margin-top:12px">A senha fica criptografada e nem o administrador consegue vê-la depois. Se o colaborador esquecer, é só cadastrar uma nova.</div>
+    <div class="modal-acoes">
+      ${tem?`<button class="btn btn-vermelho" onclick="removerSenhaPonto('${employeeId}')">Remover senha</button>`:''}
+      <button class="btn btn-cinza" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-azul" onclick="salvarSenhaPonto('${employeeId}')">Salvar</button>
+    </div>
+  `;
+  abrirModal();
+}
+async function salvarSenhaPonto(employeeId){
+  const p1 = val('pinNovo').trim(), p2 = val('pinNovo2').trim();
+  if(!/^[0-9]{4,8}$/.test(p1)){ alert('A senha deve ter de 4 a 8 números.'); return; }
+  if(p1!==p2){ alert('As senhas não conferem.'); return; }
+  const { data, error } = await sb.rpc('set_employee_pin', {p_employee_id: employeeId, p_pin: p1, p_usuario: currentUser.nome});
+  if(error || !data || !data.ok){ alert('Erro ao salvar a senha: '+(error?error.message:(data&&data.erro)||'tente novamente')); return; }
+  if(!state.pins.includes(employeeId)) state.pins.push(employeeId);
+  const e = dbGet('employees').find(x=>x.id===employeeId);
+  logAudit(`Senha de ponto definida para ${e?e.nome:employeeId}`);
+  fecharModal(); renderColaboradores();
+}
+async function removerSenhaPonto(employeeId){
+  const e = dbGet('employees').find(x=>x.id===employeeId);
+  if(!confirm(`Remover a senha de ponto de ${e?e.nome:''}? Sem senha, qualquer pessoa poderá registrar o ponto dele.`)) return;
+  const { data, error } = await sb.rpc('set_employee_pin', {p_employee_id: employeeId, p_pin: '', p_usuario: currentUser.nome});
+  if(error || !data || !data.ok){ alert('Erro ao remover a senha.'); return; }
+  state.pins = state.pins.filter(id=>id!==employeeId);
+  logAudit(`Senha de ponto removida de ${e?e.nome:employeeId}`);
+  fecharModal(); renderColaboradores();
 }
 
 function renderColaboradores(){
@@ -670,15 +755,17 @@ function renderColaboradores(){
     <div style="margin-bottom:14px"><button class="btn btn-azul" onclick="abrirModalColaborador()">+ Novo Colaborador</button></div>
     <div class="card">
       <table>
-        <thead><tr><th>Nome</th><th>Cargo</th><th>Setor</th><th>Salário</th><th>Jornada</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Nome</th><th>Cargo</th><th>Setor</th><th>Salário</th><th>Jornada</th><th>Status</th><th>Senha de ponto</th><th></th></tr></thead>
         <tbody>
           ${emp.map(e=>`<tr>
             <td>${e.nome}</td><td>${e.cargo}</td><td>${e.setor}</td><td>${formatBRL(e.salario)}</td>
             <td>${e.jornada.entrada}-${e.jornada.saida}</td>
             <td><span class="badge ${e.status==='Ativo'?'badge-verde':'badge-cinza'}">${e.status}</span></td>
+            <td><span class="badge ${(state.pins||[]).includes(e.id)?'badge-verde':'badge-amarelo'}">${(state.pins||[]).includes(e.id)?'Cadastrada':'Pendente'}</span>
+                <button class="icon-btn" onclick="abrirModalSenha('${e.id}')">🔑 ${(state.pins||[]).includes(e.id)?'Trocar':'Definir'}</button></td>
             <td><button class="icon-btn" onclick="abrirModalColaborador('${e.id}')">Editar</button>
                 <button class="icon-btn del" onclick="excluirColaborador('${e.id}')">Excluir</button></td>
-          </tr>`).join('') || '<tr><td colspan="7" style="color:var(--cinza)">Nenhum colaborador cadastrado.</td></tr>'}
+          </tr>`).join('') || '<tr><td colspan="8" style="color:var(--cinza)">Nenhum colaborador cadastrado.</td></tr>'}
         </tbody>
       </table>
     </div>
