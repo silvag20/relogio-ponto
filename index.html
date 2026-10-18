@@ -204,7 +204,7 @@ function mapCorrectionFromDB(row){
   return { id: row.id, employeeId: row.employee_id, data: row.data, horario: (row.horario_solicitado||'').slice(0,5), motivo: row.motivo, status: row.status };
 }
 function mapSettingsFromDB(row){
-  return { empresa: row.empresa||'', toleranciaAtraso: row.tolerancia_atraso_min??5, percentualExtra: row.percentual_extra??50, percentualExtraFeriado: row.percentual_extra_feriado??100, cargaMensalPadrao: row.carga_mensal_padrao??220, _id: row.id };
+  return { empresa: row.empresa||'', toleranciaAtraso: row.tolerancia_atraso_min??5, percentualExtra: row.percentual_extra??50, percentualExtraFeriado: row.percentual_extra_feriado??100, cargaMensalPadrao: row.carga_mensal_padrao??220, inicioControle: row.inicio_controle||'', _id: row.id };
 }
 
 /* Carrega todas as tabelas do Supabase para o estado local */
@@ -865,6 +865,8 @@ function renderEspelho(){
   for(let d=1; d<=dias; d++){
     const dataISO = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const regsDia = records.filter(r=>r.date===dataISO);
+    const inicioCtl = dbGet('settings').inicioControle;
+    if(inicioCtl && dataISO < inicioCtl && regsDia.length===0 && !ausenciaDoDia(func.id, dataISO)) continue;
     const tipos = {}; regsDia.forEach(r=>tipos[r.tipo]=r.hora);
     const trabMin = calcularTrabalhadoDia(regsDia, dataISO);
     const isHoliday = holidays.has(dataISO);
@@ -880,7 +882,7 @@ function renderEspelho(){
       const tol = dbGet('settings').toleranciaAtraso||0;
       atrasoMin = Math.max(0, horaParaMin(tipos['Entrada']) - horaParaMin(func.jornada.entrada) - tol);
       // Dia encerrado: se compensou no mesmo dia (saiu mais tarde), o atraso é só o que realmente faltou
-      if(tipos['Saída']) atrasoMin = Math.min(atrasoMin, Math.max(0, prevMin - trabMin));
+      if(tipos['Saída'] || dataISO < hojeISO()) atrasoMin = Math.min(atrasoMin, Math.max(0, prevMin - trabMin));
     }
     totalTrab += trabMin; totalPrev += prevMin; totalExtra += extraMin; totalAtraso += atrasoMin; totalDom += domingoDia;
     if(aus && !ausJustificada && !diaEspecial && dataISO<=hojeISO()) totalFolga += Math.max(0, prevMin - trabMin);
@@ -1052,6 +1054,7 @@ function calcularResumoMensal(func, ano, mes){
     const dataISO = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     if(dataISO > hojeStr) continue;
     const regsDia = records.filter(r=>r.date===dataISO);
+    if(settings.inicioControle && dataISO < settings.inicioControle && regsDia.length===0) continue;
     const tipos = {}; regsDia.forEach(r=>tipos[r.tipo]=r.hora);
     const isHoliday = holidays.has(dataISO);
     const diaSemana = new Date(dataISO+'T12:00:00').getDay();
@@ -1072,7 +1075,7 @@ function calcularResumoMensal(func, ano, mes){
     if(tipos['Entrada'] && !diaEspecial){
       let atrasoDia = Math.max(0, horaParaMin(tipos['Entrada']) - horaParaMin(func.jornada.entrada) - (settings.toleranciaAtraso||0));
       // Dia encerrado: se compensou no mesmo dia (saiu mais tarde), o atraso é só o que realmente faltou
-      if(tipos['Saída']) atrasoDia = Math.min(atrasoDia, Math.max(0, prevDia - trabDia));
+      if(tipos['Saída'] || dataISO < hojeStr) atrasoDia = Math.min(atrasoDia, Math.max(0, prevDia - trabDia));
       atrasoMin += atrasoDia;
     } else if(prevDia>0 && diaSemana!==0 && diaSemana!==6 && !aus){
       faltas++;
@@ -1889,6 +1892,8 @@ function renderConfig(){
       <label>Percentual de hora extra em dia normal (%)</label><input id="cfgExtra" type="number" value="${s.percentualExtra}">
       <label>Percentual de hora extra em feriado/domingo (%)</label><input id="cfgExtraFer" type="number" value="${s.percentualExtraFeriado}">
       <label>Carga horária mensal padrão</label><input id="cfgCarga" type="number" value="${s.cargaMensalPadrao}">
+      <label>Início do controle de ponto no sistema</label><input id="cfgInicio" type="date" value="${s.inicioControle||''}">
+      <div style="color:var(--cinza);font-size:0.8rem;margin-top:4px">Dias anteriores a esta data, sem nenhuma marcação, não contam como horas previstas nem como falta.</div>
       <button class="btn btn-azul" style="margin-top:18px" onclick="salvarConfig()">Salvar Configurações</button>
     </div>
   `;
@@ -1897,7 +1902,8 @@ async function salvarConfig(){
   const s = {
     empresa:val('cfgEmpresa'), tolerancia_atraso_min:parseInt(val('cfgTolerancia'))||0,
     percentual_extra:parseFloat(val('cfgExtra'))||50, percentual_extra_feriado:parseFloat(val('cfgExtraFer'))||100,
-    carga_mensal_padrao:parseInt(val('cfgCarga'))||220
+    carga_mensal_padrao:parseInt(val('cfgCarga'))||220,
+    inicio_controle: val('cfgInicio') || null
   };
   const existeId = state.settings._id;
   const query = existeId
