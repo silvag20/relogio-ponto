@@ -294,7 +294,9 @@ function fmtExtras(r){
   return minParaHora(r.extraMin) + (r.domingoMin>0 ? ` + ${minParaHora(r.domingoMin)} <small style="color:var(--cinza)">(dom/feriado ${dbGet('settings').percentualExtraFeriado}%)</small>` : '');
 }
 
-function horasPrevistasDia(func){
+const SABADO_PREVISTO_MIN = 240; // escala de sábado: 4 horas
+function horasPrevistasDia(func, dataISO){
+  if(dataISO && new Date(dataISO+'T12:00:00').getDay()===6) return SABADO_PREVISTO_MIN;
   const j = func.jornada;
   const ent = horaParaMin(j.entrada), int1 = horaParaMin(j.intervaloInicio), int2 = horaParaMin(j.intervaloFim), sai = horaParaMin(j.saida);
   function diff(a,b){ let d=b-a; if(d<0) d+=24*60; return d; }
@@ -584,7 +586,7 @@ function renderPonto(){
   const trabalhadoMin = calcularTrabalhadoDia(regsHoje, hoje);
   const ausHoje = ausenciaDoDia(alvo.id, hoje);
   const ausJustHoje = ausHoje && ausHoje.tipo!=='Folga (banco de horas)';
-  const previstoMin = (ausJustHoje || ehDiaEspecial(hoje)) ? 0 : horasPrevistasDia(alvo);
+  const previstoMin = (ausJustHoje || ehDiaEspecial(hoje)) ? 0 : horasPrevistasDia(alvo, hoje);
   const saldo = trabalhadoMin - previstoMin;
 
   // Avisos de férias/ausências do colaborador (hoje e próximas)
@@ -628,7 +630,7 @@ function renderPonto(){
     </div>
     <div class="card">
       <div class="linha-status" style="justify-content:space-around">
-        <div><div class="val">${alvo.jornada.entrada} às ${alvo.jornada.saida}</div><div class="lbl">Jornada de hoje</div></div>
+        <div><div class="val">${new Date(hoje+'T12:00:00').getDay()===6 ? 'Sábado · '+minParaHora(SABADO_PREVISTO_MIN) : alvo.jornada.entrada+' às '+alvo.jornada.saida}</div><div class="lbl">Jornada de hoje</div></div>
         <div><div class="val">${minParaHora(trabalhadoMin)}</div><div class="lbl">Trabalhado hoje</div></div>
         <div><div class="val" style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'}">${saldo>=0?'+':''}${minParaHora(saldo)}</div><div class="lbl">Saldo de hoje</div></div>
       </div>
@@ -875,7 +877,7 @@ function renderEspelho(){
     const diaEspecial = isHoliday || isDomingo;
     const aus = ausenciaDoDia(func.id, dataISO);
     const ausJustificada = aus && aus.tipo!=='Folga (banco de horas)';
-    const prevMin = (diaEspecial || ausJustificada) ? 0 : horasPrevistasDia(func);
+    const prevMin = (diaEspecial || ausJustificada) ? 0 : horasPrevistasDia(func, dataISO);
     const extraMin = diaEspecial ? 0 : Math.max(0, trabMin - prevMin);
     const domingoDia = diaEspecial ? trabMin : 0;
     const parcialFechado = !diaEspecial && !aus && tipos['Entrada'] && !tipos['Retorno'] && (tipos['Saída Intervalo'] || tipos['Saída']) && (tipos['Saída'] || dataISO < hojeISO());
@@ -1063,7 +1065,7 @@ function calcularResumoMensal(func, ano, mes){
     const diaEspecial = isHoliday || diaSemana===0;
     const aus = ausenciaDoDia(func.id, dataISO);
     const ausJustificada = aus && aus.tipo!=='Folga (banco de horas)';
-    const prevDia = (diaEspecial || ausJustificada) ? 0 : horasPrevistasDia(func);
+    const prevDia = (diaEspecial || ausJustificada) ? 0 : horasPrevistasDia(func, dataISO);
     const trabDia = calcularTrabalhadoDia(regsDia, dataISO);
     // Hoje sem Saída: dia ainda em andamento, fica fora do saldo e das extras
     const emAndamento = (dataISO===hojeStr && tipos['Entrada'] && !tipos['Saída']);
