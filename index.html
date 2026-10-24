@@ -1807,10 +1807,73 @@ function renderUsuarios(){
       <table>
         <thead><tr><th>Nome</th><th>E-mail de acesso</th><th>Perfil</th><th>Colaborador vinculado</th><th></th></tr></thead>
         <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${u.email||'-'}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome || (u.role==='admin'||u.role==='rh' ? 'Todos (acesso geral)' : (u.role==='ponto' ? 'Todos (só bate ponto)' : '-'))}</td>
-          <td><button class="icon-btn" onclick="abrirModalTrocarSenha('${u.id}','${(u.nome||'').replace(/'/g,"\\'")}')">🔑 Trocar Senha</button></td></tr>`).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
+          <td style="white-space:nowrap"><button class="icon-btn" onclick="abrirModalEditarUsuario('${u.id}')">✏️ Editar</button>
+            <button class="icon-btn" onclick="abrirModalTrocarSenha('${u.id}','${(u.nome||'').replace(/'/g,"\\'")}')">🔑 Trocar Senha</button></td></tr>`).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
       </table>
     </div>
   `;
+}
+
+function abrirModalEditarUsuario(userId){
+  const u = dbGet('usuarios').find(x=>x.id===userId); if(!u) return;
+  const emp = dbGet('employees');
+  const roles = [['admin','Administrador'],['rh','RH / Gestor'],['funcionario','Funcionário'],['ponto','Totem de Ponto']];
+  document.getElementById('modalBox').innerHTML = `
+    <h2>Editar Usuário</h2>
+    <div class="form-grid">
+      <div class="full"><label>Nome de exibição</label><input id="euNome" value="${(u.nome||'').replace(/"/g,'&quot;')}"></div>
+      <div class="full"><label>E-mail de acesso</label><input id="euEmail" type="email" value="${u.email||''}"></div>
+      <div class="full"><label>Perfil</label>
+        <select id="euRole" onchange="atualizarVinculoEdicao()">${roles.map(([v,l])=>`<option value="${v}" ${u.role===v?'selected':''}>${l}</option>`).join('')}</select></div>
+      <div class="full" id="euBlocoFunc"><label>Colaborador vinculado</label>
+        <select id="euFunc">
+          <option value="" id="euOpTodos">Todos os colaboradores (acesso geral)</option>
+          ${emp.map(e=>`<option value="${e.id}" ${u.employeeId===e.id?'selected':''}>${e.nome}</option>`).join('')}
+        </select></div>
+    </div>
+    <div class="aviso" style="margin-top:12px">Ao mudar o e-mail, a pessoa passa a entrar com o novo endereço (a senha continua a mesma). A mudança de perfil vale no próximo acesso dela.</div>
+    <div class="modal-acoes">
+      <button class="btn btn-cinza" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-azul" onclick="salvarEdicaoUsuario('${userId}')">Salvar</button>
+    </div>
+  `;
+  abrirModal();
+  atualizarVinculoEdicao();
+}
+function atualizarVinculoEdicao(){
+  const role = val('euRole');
+  document.getElementById('euBlocoFunc').style.display = (role==='admin' || role==='ponto') ? 'none' : 'block';
+  const op = document.getElementById('euOpTodos');
+  if(op){ op.hidden = (role==='funcionario'); op.disabled = (role==='funcionario'); if(role==='funcionario' && val('euFunc')==='') document.getElementById('euFunc').selectedIndex = 1; }
+}
+async function salvarEdicaoUsuario(userId){
+  const u = dbGet('usuarios').find(x=>x.id===userId); if(!u) return;
+  const nome = val('euNome').trim(), email = val('euEmail').trim(), role = val('euRole'), func = val('euFunc');
+  if(!nome){ alert('Informe o nome.'); return; }
+  if(!email){ alert('Informe o e-mail de acesso.'); return; }
+  if(role==='funcionario' && !func){ alert('Selecione o colaborador vinculado.'); return; }
+  const { data: sessaoAtual } = await sb.auth.getSession();
+  const token = sessaoAtual?.session?.access_token;
+  if(!token){ alert('Sessão expirada. Faça login novamente.'); return; }
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/admin-update-user`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${token}`, 'apikey':SUPABASE_KEY },
+      body: JSON.stringify({ userId, nome, role, email: email!==u.email ? email : undefined, employeeId: (role==='admin'||role==='ponto') ? null : (func||null) })
+    });
+    const r = await resp.json();
+    if(!resp.ok){ alert('Erro ao salvar: '+(r.error||resp.statusText)); return; }
+    const mudancas = [];
+    if(nome!==u.nome) mudancas.push(`nome "${u.nome}" → "${nome}"`);
+    if(email!==u.email) mudancas.push(`e-mail ${u.email} → ${email}`);
+    if(role!==u.role) mudancas.push(`perfil ${rotuloPerfil(u.role)} → ${rotuloPerfil(role)}`);
+    logAudit(`Usuário editado (${nome}): ${mudancas.join('; ') || 'vínculo/dados atualizados'}`);
+    fecharModal();
+    await carregarTudo();
+    renderUsuarios();
+  }catch(e){
+    alert('Erro ao salvar: '+e.message);
+  }
 }
 
 function abrirModalTrocarSenha(userId, nome){
