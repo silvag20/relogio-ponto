@@ -230,7 +230,12 @@ async function carregarTudo(){
   state.closures = (cloRes.data||[]).map(c=>({employeeId:c.employee_id, ano:c.ano, mes:c.mes, fechadoPor:c.fechado_por, data:c.fechado_em}));
   state.absences = (ausRes.data||[]).map(a=>({id:a.id, employeeId:a.employee_id, tipo:a.tipo, inicio:a.data_inicio, fim:a.data_fim, obs:a.observacao||'', criadoPor:a.criado_por||''}));
   try{ const pr = await sb.rpc('employees_with_pin'); state.pins = Array.isArray(pr.data) ? pr.data : []; }catch(e){ state.pins = []; }
-  state.usuarios = (usrRes.data||[]).map(u=>({id:u.id, nome:u.nome, role:u.role, employeeId:u.employee_id, employeeNome:u.employees?u.employees.nome:null}));
+  let emailsPorId = {};
+  try{
+    const er = await sb.rpc('listar_emails_usuarios');
+    (Array.isArray(er.data)?er.data:[]).forEach(x=>{ emailsPorId[x.id] = x.email; });
+  }catch(e){}
+  state.usuarios = (usrRes.data||[]).map(u=>({id:u.id, nome:u.nome, email:emailsPorId[u.id]||'', role:u.role, employeeId:u.employee_id, employeeNome:u.employees?u.employees.nome:null}));
 }
 
 async function logAudit(acao){
@@ -1800,9 +1805,9 @@ function renderUsuarios(){
     <div class="card">
       <h3 style="margin-top:0">Usuários cadastrados</h3>
       <table>
-        <thead><tr><th>Nome</th><th>Perfil</th><th>Colaborador vinculado</th><th></th></tr></thead>
-        <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome || (u.role==='admin'||u.role==='rh' ? 'Todos (acesso geral)' : (u.role==='ponto' ? 'Todos (só bate ponto)' : '-'))}</td>
-          <td><button class="icon-btn" onclick="abrirModalTrocarSenha('${u.id}','${(u.nome||'').replace(/'/g,"\\'")}')">🔑 Trocar Senha</button></td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
+        <thead><tr><th>Nome</th><th>E-mail de acesso</th><th>Perfil</th><th>Colaborador vinculado</th><th></th></tr></thead>
+        <tbody>${usuarios.map(u=>`<tr><td>${u.nome}</td><td>${u.email||'-'}</td><td>${rotuloPerfil(u.role)}</td><td>${u.employeeNome || (u.role==='admin'||u.role==='rh' ? 'Todos (acesso geral)' : (u.role==='ponto' ? 'Todos (só bate ponto)' : '-'))}</td>
+          <td><button class="icon-btn" onclick="abrirModalTrocarSenha('${u.id}','${(u.nome||'').replace(/'/g,"\\'")}')">🔑 Trocar Senha</button></td></tr>`).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum usuário cadastrado ainda.</td></tr>'}</tbody>
       </table>
     </div>
   `;
