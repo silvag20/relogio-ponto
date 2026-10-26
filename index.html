@@ -1104,9 +1104,10 @@ function calcularResumoMensal(func, ano, mes){
   const folgaSemSaldoMin = folgaBancoMin - folgaCompensadaMin;
   extraMin = extraBrutoMin - compensadoMin;
   atrasoMin = atrasoBrutoMin - compAtrasoMin;
-  const valorExtra = extraMin * valorMinuto * (1 + (settings.percentualExtra||50)/100)
-    + domingoMin * valorMinuto * (1 + (settings.percentualExtraFeriado||100)/100);
-  return {trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraMin+domingoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, folgaBancoMin, folgaCompensadaMin, folgaSemSaldoMin, faltas, valorHora, valorMinuto, valorExtra};
+  const valorExtra50 = extraMin * valorMinuto * (1 + (settings.percentualExtra||50)/100);
+  const valorExtra100 = domingoMin * valorMinuto * (1 + (settings.percentualExtraFeriado||100)/100);
+  const valorExtra = valorExtra50 + valorExtra100;
+  return {valorExtra50, valorExtra100, trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraMin+domingoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, folgaBancoMin, folgaCompensadaMin, folgaSemSaldoMin, faltas, valorHora, valorMinuto, valorExtra};
 }
 
 function renderHorasExtras(){
@@ -1116,13 +1117,13 @@ function renderHorasExtras(){
     <h1>Horas Extras (${nomeMes(mes)}/${ano})</h1>
     <div class="card">
       <table>
-        <thead><tr><th>Colaborador</th><th>Horas Extras</th><th>Valor Hora</th><th>% Aplicado</th><th>Valor Total</th></tr></thead>
+        <thead><tr><th>Colaborador</th><th>Extras 50%</th><th>Extras 100% (dom/feriado)</th><th>Valor Hora</th><th>Valor 50%</th><th>Valor 100%</th><th>Valor Total</th></tr></thead>
         <tbody>
           ${emp.map(f=>{
             const r = calcularResumoMensal(f, ano, mes);
-            return `<tr><td>${f.nome}</td><td>${fmtExtras(r)}</td><td>${formatBRL(r.valorHora)}</td>
-              <td>${dbGet('settings').percentualExtra}%</td><td>${formatBRL(r.valorExtra)}</td></tr>`;
-          }).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
+            return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td>${minParaHora(r.domingoMin)}</td><td>${formatBRL(r.valorHora)}</td>
+              <td>${formatBRL(r.valorExtra50)}</td><td>${formatBRL(r.valorExtra100)}</td><td><b>${formatBRL(r.valorExtra)}</b></td></tr>`;
+          }).join('') || '<tr><td colspan="7" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
         </tbody>
       </table>
     </div>
@@ -1144,7 +1145,7 @@ function renderBancoHoras(){
             const saldo = (r.trabalhadoMin - r.abertoHojeMin - r.domingoMin) - r.previstoMin;
             return `<tr><td>${f.nome}</td><td>${minParaHora(r.trabalhadoMin)}</td><td>${minParaHora(r.previstoMin)}</td><td>${minParaHora(r.compensadoMin)}</td>
               <td style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'};font-weight:600">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>`;
-          }).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
+          }).join('') || '<tr><td colspan="7" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
         </tbody>
       </table>
     </div>
@@ -1240,8 +1241,9 @@ function abrirDetalhesFolha(employeeId, ano, mes){
         <tr><td>Horas trabalhadas</td><td class="valor">${minParaHora(r.trabalhadoMin)}</td></tr>
         <tr><td>Saldo do período</td><td class="valor" style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'}">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>
         <tr><td>Compensado (extras abatendo atrasos)</td><td class="valor">${minParaHora(r.compensadoMin)}</td></tr>
-        <tr><td>Horas extras líquidas (${dbGet('settings').percentualExtra}%)</td><td class="valor">${fmtExtras(r)}</td></tr>
-        <tr><td><b>Valor das horas extras</b></td><td class="valor"><b>${formatBRL(r.valorExtra)}</b></td></tr>
+        <tr><td>Horas extras ${dbGet('settings').percentualExtra}% (líquidas)</td><td class="valor">${minParaHora(r.extraMin)} · ${formatBRL(r.valorExtra50)}</td></tr>
+        <tr><td>Horas extras ${dbGet('settings').percentualExtraFeriado}% (domingos e feriados)</td><td class="valor">${minParaHora(r.domingoMin)} · ${formatBRL(r.valorExtra100)}</td></tr>
+        <tr><td><b>Valor total das horas extras</b></td><td class="valor"><b>${formatBRL(r.valorExtra)}</b></td></tr>
         <tr><td>Atrasos (minutos)</td><td class="valor">${minParaHora(r.atrasoMin)}</td></tr>
         <tr><td>Valor estimado do desconto por atraso</td><td class="valor">${formatBRL(descontoAtraso)}</td></tr>
         <tr><td>Faltas</td><td class="valor">${r.faltas} dia(s)</td></tr>
@@ -1304,7 +1306,8 @@ function gerarDemonstrativo(employeeId, ano, mes){
           <thead><tr><th>Descrição</th><th>Referência</th><th class="valor">Valor</th></tr></thead>
           <tbody>
             <tr><td>Salário base</td><td>${f.cargaMensal}h</td><td class="valor">${formatBRL(f.salario)}</td></tr>
-            ${(r.extraMin>0||r.domingoMin>0)?`<tr><td>Horas extras (${s.percentualExtra}%) / domingo-feriado (${s.percentualExtraFeriado}%)</td><td>${fmtExtras(r)}</td><td class="valor">${formatBRL(r.valorExtra)}</td></tr>`:''}
+            ${r.extraMin>0?`<tr><td>Horas extras ${s.percentualExtra}%</td><td>${minParaHora(r.extraMin)}</td><td class="valor">${formatBRL(r.valorExtra50)}</td></tr>`:''}
+            ${r.domingoMin>0?`<tr><td>Horas extras ${s.percentualExtraFeriado}% (domingos e feriados)</td><td>${minParaHora(r.domingoMin)}</td><td class="valor">${formatBRL(r.valorExtra100)}</td></tr>`:''}
           </tbody>
         </table>
 
@@ -1437,8 +1440,8 @@ function renderResultadoRelatorio(tipo, funcId, ano, mes){
     const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
       totalExtraMin += r.extraTotalMin; totalValor += r.valorExtra;
-      return `<tr><td>${f.nome}</td><td>${fmtExtras(r)}</td><td>${formatBRL(r.valorHora)}</td>
-        <td>${dbGet('settings').percentualExtra}%</td><td>${formatBRL(r.valorExtra)}</td></tr>`;
+      return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td>${minParaHora(r.domingoMin)}</td><td>${formatBRL(r.valorHora)}</td>
+        <td>${formatBRL(r.valorExtra50)}</td><td>${formatBRL(r.valorExtra100)}</td><td><b>${formatBRL(r.valorExtra)}</b></td></tr>`;
     }).join('');
     alvo.innerHTML = `
       <div class="grid-cards">
@@ -1448,8 +1451,8 @@ function renderResultadoRelatorio(tipo, funcId, ano, mes){
       <div class="card">
         <h3 style="margin-top:0">Horas Extras — ${nomeMes(mes)}/${ano}</h3>
         <table>
-          <thead><tr><th>Colaborador</th><th>Horas Extras</th><th>Valor Hora</th><th>% Aplicado</th><th>Valor Total</th></tr></thead>
-          <tbody>${linhas || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}</tbody>
+          <thead><tr><th>Colaborador</th><th>Extras 50%</th><th>Extras 100% (dom/feriado)</th><th>Valor Hora</th><th>Valor 50%</th><th>Valor 100%</th><th>Valor Total</th></tr></thead>
+          <tbody>${linhas || '<tr><td colspan="7" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}</tbody>
         </table>
       </div>`;
   }
@@ -1517,18 +1520,19 @@ function gerarRelatorioPDF(){
 
   if(tipo==='extras'){
     tituloRel = 'Horas Extras';
-    let totalExtraMin=0, totalValor=0;
+    let totalExtraMin=0, totalValor=0, t50=0, t100=0, v50=0, v100=0;
     const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
       totalExtraMin += r.extraTotalMin; totalValor += r.valorExtra;
-      return `<tr><td>${f.nome}</td><td>${fmtExtras(r)}</td><td class="valor">${formatBRL(r.valorHora)}</td>
-        <td class="valor">${s.percentualExtra}%</td><td class="valor">${formatBRL(r.valorExtra)}</td></tr>`;
+      t50+=r.extraMin; t100+=r.domingoMin; v50+=r.valorExtra50; v100+=r.valorExtra100;
+      return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td>${minParaHora(r.domingoMin)}</td><td class="valor">${formatBRL(r.valorHora)}</td>
+        <td class="valor">${formatBRL(r.valorExtra50)}</td><td class="valor">${formatBRL(r.valorExtra100)}</td><td class="valor"><b>${formatBRL(r.valorExtra)}</b></td></tr>`;
     }).join('');
     corpoHtml = `
       <table>
-        <thead><tr><th>Colaborador</th><th>Horas Extras</th><th class="valor">Valor Hora</th><th class="valor">% Aplicado</th><th class="valor">Valor Total</th></tr></thead>
-        <tbody>${linhas || '<tr><td colspan="5">Nenhum colaborador.</td></tr>'}</tbody>
-        <tfoot><tr><td><b>Total</b></td><td><b>${minParaHora(totalExtraMin)}</b></td><td></td><td></td><td class="valor"><b>${formatBRL(totalValor)}</b></td></tr></tfoot>
+        <thead><tr><th>Colaborador</th><th>Extras 50%</th><th>Extras 100% (dom/feriado)</th><th class="valor">Valor Hora</th><th class="valor">Valor 50%</th><th class="valor">Valor 100%</th><th class="valor">Valor Total</th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="7">Nenhum colaborador.</td></tr>'}</tbody>
+        <tfoot><tr><td><b>Total</b></td><td><b>${minParaHora(t50)}</b></td><td><b>${minParaHora(t100)}</b></td><td></td><td class="valor"><b>${formatBRL(v50)}</b></td><td class="valor"><b>${formatBRL(v100)}</b></td><td class="valor"><b>${formatBRL(totalValor)}</b></td></tr></tfoot>
       </table>`;
   }
 
