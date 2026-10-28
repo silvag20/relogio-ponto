@@ -891,7 +891,7 @@ function renderEspelho(){
       const tol = dbGet('settings').toleranciaAtraso||0;
       atrasoMin = Math.max(0, horaParaMin(tipos['Entrada']) - horaParaMin(func.jornada.entrada) - tol);
       // Dia encerrado: se compensou no mesmo dia (saiu mais tarde), o atraso é só o que realmente faltou
-      if(tipos['Saída'] || dataISO < hojeISO()) atrasoMin = Math.min(atrasoMin, Math.max(0, prevMin - trabMin));
+      if(tipos['Saída'] || dataISO < hojeISO()){ const falt = Math.max(0, prevMin - trabMin); atrasoMin = falt > tol ? falt : 0; }
     }
     totalTrab += trabMin; totalPrev += prevMin; totalExtra += extraMin; totalAtraso += atrasoMin; totalDom += domingoDia;
     if(((aus && !ausJustificada) || parcialFechado) && !diaEspecial && dataISO<=hojeISO()) totalFolga += Math.max(0, prevMin - trabMin);
@@ -1087,7 +1087,7 @@ function calcularResumoMensal(func, ano, mes){
     if(tipos['Entrada'] && !diaEspecial && !parcialFechado){
       let atrasoDia = Math.max(0, horaParaMin(tipos['Entrada']) - horaParaMin(func.jornada.entrada) - (settings.toleranciaAtraso||0));
       // Dia encerrado: se compensou no mesmo dia (saiu mais tarde), o atraso é só o que realmente faltou
-      if(tipos['Saída'] || dataISO < hojeStr) atrasoDia = Math.min(atrasoDia, Math.max(0, prevDia - trabDia));
+      if(tipos['Saída'] || dataISO < hojeStr){ const falt = Math.max(0, prevDia - trabDia); atrasoDia = falt > (settings.toleranciaAtraso||0) ? falt : 0; }
       atrasoMin += atrasoDia;
     } else if(prevDia>0 && diaSemana!==0 && diaSemana!==6 && !aus){
       faltas++;
