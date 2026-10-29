@@ -227,7 +227,7 @@ async function carregarTudo(){
   state.settings = setRes.data ? mapSettingsFromDB(setRes.data) : {empresa:'',toleranciaAtraso:5,percentualExtra:50,percentualExtraFeriado:100,cargaMensalPadrao:220};
   state.corrections = (corRes.data||[]).map(mapCorrectionFromDB);
   state.audit = (audRes.data||[]).map(a=>({data:a.created_at, usuario:a.usuario_nome, acao:a.acao}));
-  state.closures = (cloRes.data||[]).map(c=>({employeeId:c.employee_id, ano:c.ano, mes:c.mes, fechadoPor:c.fechado_por, data:c.fechado_em}));
+  state.closures = (cloRes.data||[]).map(c=>({employeeId:c.employee_id, ano:c.ano, mes:c.mes, fechadoPor:c.fechado_por, data:c.fechado_em, horasPagasMin:c.horas_pagas_min}));
   state.absences = (ausRes.data||[]).map(a=>({id:a.id, employeeId:a.employee_id, tipo:a.tipo, inicio:a.data_inicio, fim:a.data_fim, obs:a.observacao||'', criadoPor:a.criado_por||''}));
   try{ const pr = await sb.rpc('employees_with_pin'); state.pins = Array.isArray(pr.data) ? pr.data : []; }catch(e){ state.pins = []; }
   let emailsPorId = {};
@@ -296,7 +296,7 @@ function ehDiaEspecial(dataISO){
   return dow===0 || dbGet('holidays').some(h=>h.data===dataISO);
 }
 function fmtExtras(r){
-  return minParaHora(r.extraMin) + (r.domingoMin>0 ? ` + ${minParaHora(r.domingoMin)} <small style="color:var(--cinza)">(dom/feriado ${dbGet('settings').percentualExtraFeriado}%)</small>` : '');
+  return minParaHora(r.extraPagaMin) + (r.domingoMin>0 ? ` + ${minParaHora(r.domingoMin)} <small style="color:var(--cinza)">(dom/feriado ${dbGet('settings').percentualExtraFeriado}%)</small>` : '');
 }
 
 const SABADO_PREVISTO_MIN = 240; // escala de sábado: 4 horas
@@ -1104,10 +1104,21 @@ function calcularResumoMensal(func, ano, mes){
   const folgaSemSaldoMin = folgaBancoMin - folgaCompensadaMin;
   extraMin = extraBrutoMin - compensadoMin;
   atrasoMin = atrasoBrutoMin - compAtrasoMin;
-  const valorExtra50 = extraMin * valorMinuto * (1 + (settings.percentualExtra||50)/100);
+  // Fechamento: o RH define quantas horas positivas serão pagas; o que sobrar vai para o mês seguinte
+  let saldoAnteriorMin = 0;
+  const mAnt = mes===0?11:mes-1, aAnt = mes===0?ano-1:ano;
+  const closAll = dbGet('closures');
+  const cAnt = closAll.find(c=>c.employeeId===func.id && c.ano===aAnt && c.mes===mAnt);
+  if(cAnt && cAnt.horasPagasMin!=null) saldoAnteriorMin = calcularResumoMensal(func, aAnt, mAnt).saldoProximoMin;
+  const disponivelMin = extraMin + saldoAnteriorMin;
+  const cAtual = closAll.find(c=>c.employeeId===func.id && c.ano===ano && c.mes===mes);
+  const fechadoComHoras = !!(cAtual && cAtual.horasPagasMin!=null);
+  const extraPagaMin = fechadoComHoras ? Math.min(cAtual.horasPagasMin, disponivelMin) : disponivelMin;
+  const saldoProximoMin = disponivelMin - extraPagaMin;
+  const valorExtra50 = extraPagaMin * valorMinuto * (1 + (settings.percentualExtra||50)/100);
   const valorExtra100 = domingoMin * valorMinuto * (1 + (settings.percentualExtraFeriado||100)/100);
   const valorExtra = valorExtra50 + valorExtra100;
-  return {valorExtra50, valorExtra100, trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraMin+domingoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, folgaBancoMin, folgaCompensadaMin, folgaSemSaldoMin, faltas, valorHora, valorMinuto, valorExtra};
+  return {extraPagaMin, saldoAnteriorMin, disponivelMin, saldoProximoMin, fechadoComHoras, valorExtra50, valorExtra100, trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraPagaMin+domingoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, folgaBancoMin, folgaCompensadaMin, folgaSemSaldoMin, faltas, valorHora, valorMinuto, valorExtra};
 }
 
 function renderHorasExtras(){
@@ -1121,7 +1132,7 @@ function renderHorasExtras(){
         <tbody>
           ${emp.map(f=>{
             const r = calcularResumoMensal(f, ano, mes);
-            return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td>${minParaHora(r.domingoMin)}</td><td>${formatBRL(r.valorHora)}</td>
+            return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraPagaMin)}</td><td>${minParaHora(r.domingoMin)}</td><td>${formatBRL(r.valorHora)}</td>
               <td>${formatBRL(r.valorExtra50)}</td><td>${formatBRL(r.valorExtra100)}</td><td><b>${formatBRL(r.valorExtra)}</b></td></tr>`;
           }).join('') || '<tr><td colspan="7" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
         </tbody>
@@ -1197,7 +1208,7 @@ function renderFolha(){
             const fechada = closures.find(c=>c.employeeId===f.id && c.ano===ano && c.mes===mes);
             return `<tr>
               <td>${f.nome}</td><td>${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
-              <td>${fmtExtras(r)}</td><td>${minParaHora(r.atrasoMin)}</td><td>${r.faltas}</td>
+              <td>${fmtExtras(r)}${(r.saldoProximoMin>0||r.saldoAnteriorMin>0)?`<br><small style="color:var(--cinza)">${r.saldoAnteriorMin>0?`anterior +${minParaHora(r.saldoAnteriorMin)} · `:''}${r.saldoProximoMin>0?`p/ próx. mês ${minParaHora(r.saldoProximoMin)}`:''}</small>`:''}</td><td>${minParaHora(r.atrasoMin)}</td><td>${r.faltas}</td>
               <td>${formatBRL(r.valorExtra)}</td>
               <td>${fechada?'<span class="badge badge-verde">Fechada</span>':'<span class="badge badge-amarelo">Aberta</span>'}</td>
               <td style="white-space:nowrap">
@@ -1241,7 +1252,10 @@ function abrirDetalhesFolha(employeeId, ano, mes){
         <tr><td>Horas trabalhadas</td><td class="valor">${minParaHora(r.trabalhadoMin)}</td></tr>
         <tr><td>Saldo do período</td><td class="valor" style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'}">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>
         <tr><td>Compensado (extras abatendo atrasos)</td><td class="valor">${minParaHora(r.compensadoMin)}</td></tr>
-        <tr><td>Horas extras ${dbGet('settings').percentualExtra}% (líquidas)</td><td class="valor">${minParaHora(r.extraMin)} · ${formatBRL(r.valorExtra50)}</td></tr>
+        <tr><td>Horas extras do mês (líquidas)</td><td class="valor">${minParaHora(r.extraMin)}</td></tr>
+        <tr><td>Saldo de extras vindo do mês anterior</td><td class="valor">${minParaHora(r.saldoAnteriorMin)}</td></tr>
+        <tr><td>Horas extras ${dbGet('settings').percentualExtra}% pagas ${r.fechadoComHoras?'':'(ainda não definido no fechamento)'}</td><td class="valor">${minParaHora(r.extraPagaMin)} · ${formatBRL(r.valorExtra50)}</td></tr>
+        <tr><td>Saldo que passa para o próximo mês</td><td class="valor">${minParaHora(r.saldoProximoMin)}</td></tr>
         <tr><td>Horas extras ${dbGet('settings').percentualExtraFeriado}% (domingos e feriados)</td><td class="valor">${minParaHora(r.domingoMin)} · ${formatBRL(r.valorExtra100)}</td></tr>
         <tr><td><b>Valor total das horas extras</b></td><td class="valor"><b>${formatBRL(r.valorExtra)}</b></td></tr>
         <tr><td>Atrasos (minutos)</td><td class="valor">${minParaHora(r.atrasoMin)}</td></tr>
@@ -1306,7 +1320,7 @@ function gerarDemonstrativo(employeeId, ano, mes){
           <thead><tr><th>Descrição</th><th>Referência</th><th class="valor">Valor</th></tr></thead>
           <tbody>
             <tr><td>Salário base</td><td>${f.cargaMensal}h</td><td class="valor">${formatBRL(f.salario)}</td></tr>
-            ${r.extraMin>0?`<tr><td>Horas extras ${s.percentualExtra}%</td><td>${minParaHora(r.extraMin)}</td><td class="valor">${formatBRL(r.valorExtra50)}</td></tr>`:''}
+            ${r.extraPagaMin>0?`<tr><td>Horas extras ${s.percentualExtra}%</td><td>${minParaHora(r.extraPagaMin)}</td><td class="valor">${formatBRL(r.valorExtra50)}</td></tr>`:''}
             ${r.domingoMin>0?`<tr><td>Horas extras ${s.percentualExtraFeriado}% (domingos e feriados)</td><td>${minParaHora(r.domingoMin)}</td><td class="valor">${formatBRL(r.valorExtra100)}</td></tr>`:''}
           </tbody>
         </table>
@@ -1339,15 +1353,50 @@ function gerarDemonstrativo(employeeId, ano, mes){
   `;
 }
 let folhaMes=null, folhaAno=null;
-async function fecharFolha(employeeId, ano, mes){
-  if(!confirm('Confirmar fechamento da folha deste colaborador para o período? Isso bloqueará novas alterações retroativas.')) return;
+function fecharFolha(employeeId, ano, mes){
+  const f = dbGet('employees').find(e=>e.id===employeeId);
+  const r = calcularResumoMensal(f, ano, mes);
+  document.getElementById('modalBox').innerHTML = `
+    <h2>Fechar folha — ${f.nome}</h2>
+    <p style="color:var(--cinza);margin-top:-8px">${nomeMes(mes)}/${ano}</p>
+    <table><tbody>
+      <tr><td>Horas extras do mês (líquidas)</td><td class="valor">${minParaHora(r.extraMin)}</td></tr>
+      <tr><td>Saldo vindo do mês anterior</td><td class="valor">${minParaHora(r.saldoAnteriorMin)}</td></tr>
+      <tr><td><b>Disponível para pagar</b></td><td class="valor"><b>${minParaHora(r.disponivelMin)}</b></td></tr>
+      <tr><td>Extras 100% (domingos/feriados) — pagas integralmente</td><td class="valor">${minParaHora(r.domingoMin)}</td></tr>
+    </tbody></table>
+    <label style="margin-top:12px">Horas extras (${dbGet('settings').percentualExtra}%) a pagar neste mês (HH:MM)</label>
+    <input type="text" id="fechPagarHoras" value="${minParaHora(r.disponivelMin)}" placeholder="00:00" oninput="atualizarPrevFechamento(${r.disponivelMin})">
+    <div id="fechPrev" class="aviso" style="margin-top:10px"></div>
+    <div class="modal-acoes">
+      <button class="btn btn-cinza" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-azul" onclick="confirmarFechamento('${employeeId}',${ano},${mes},${r.disponivelMin})">Fechar folha</button>
+    </div>`;
+  abrirModal();
+  atualizarPrevFechamento(r.disponivelMin);
+}
+function lerHorasCampo(v){
+  const m = String(v||'').trim().match(/^(\d{1,3}):([0-5]\d)$/);
+  return m ? parseInt(m[1])*60+parseInt(m[2]) : null;
+}
+function atualizarPrevFechamento(disp){
+  const v = lerHorasCampo(document.getElementById('fechPagarHoras').value);
+  const el = document.getElementById('fechPrev');
+  if(v===null){ el.textContent='Digite as horas no formato HH:MM (ex.: 07:30).'; return; }
+  if(v>disp){ el.textContent='O valor é maior que o disponível ('+minParaHora(disp)+').'; return; }
+  el.innerHTML = 'Será pago: <b>'+minParaHora(v)+'</b> · Passa para o próximo mês: <b>'+minParaHora(disp-v)+'</b>';
+}
+async function confirmarFechamento(employeeId, ano, mes, disp){
+  const v = lerHorasCampo(document.getElementById('fechPagarHoras').value);
+  if(v===null || v>disp || v<0){ alert('Informe as horas a pagar no formato HH:MM, sem passar do disponível ('+minParaHora(disp)+').'); return; }
   const func = dbGet('employees').find(e=>e.id===employeeId);
   const { data, error } = await sb.from('closures')
-    .insert({employee_id: employeeId, ano, mes, fechado_por: currentUser.nome})
+    .insert({employee_id: employeeId, ano, mes, fechado_por: currentUser.nome, horas_pagas_min: v})
     .select().single();
   if(error){ alert('Erro ao fechar folha: '+error.message); return; }
-  state.closures.push({employeeId:data.employee_id, ano:data.ano, mes:data.mes, fechadoPor:data.fechado_por, data:data.fechado_em});
-  logAudit(`Folha fechada: ${func.nome} - ${nomeMes(mes)}/${ano}`);
+  state.closures.push({employeeId:data.employee_id, ano:data.ano, mes:data.mes, fechadoPor:data.fechado_por, data:data.fechado_em, horasPagasMin:data.horas_pagas_min});
+  logAudit(`Folha fechada: ${func.nome} - ${nomeMes(mes)}/${ano} (extras pagas ${minParaHora(v)}, para o próximo mês ${minParaHora(disp-v)})`);
+  fecharModal();
   renderFolha();
 }
 async function reabrirFolha(employeeId, ano, mes){
@@ -1440,7 +1489,7 @@ function renderResultadoRelatorio(tipo, funcId, ano, mes){
     const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
       totalExtraMin += r.extraTotalMin; totalValor += r.valorExtra;
-      return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td>${minParaHora(r.domingoMin)}</td><td>${formatBRL(r.valorHora)}</td>
+      return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraPagaMin)}</td><td>${minParaHora(r.domingoMin)}</td><td>${formatBRL(r.valorHora)}</td>
         <td>${formatBRL(r.valorExtra50)}</td><td>${formatBRL(r.valorExtra100)}</td><td><b>${formatBRL(r.valorExtra)}</b></td></tr>`;
     }).join('');
     alvo.innerHTML = `
@@ -1524,8 +1573,8 @@ function gerarRelatorioPDF(){
     const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
       totalExtraMin += r.extraTotalMin; totalValor += r.valorExtra;
-      t50+=r.extraMin; t100+=r.domingoMin; v50+=r.valorExtra50; v100+=r.valorExtra100;
-      return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraMin)}</td><td>${minParaHora(r.domingoMin)}</td><td class="valor">${formatBRL(r.valorHora)}</td>
+      t50+=r.extraPagaMin; t100+=r.domingoMin; v50+=r.valorExtra50; v100+=r.valorExtra100;
+      return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraPagaMin)}</td><td>${minParaHora(r.domingoMin)}</td><td class="valor">${formatBRL(r.valorHora)}</td>
         <td class="valor">${formatBRL(r.valorExtra50)}</td><td class="valor">${formatBRL(r.valorExtra100)}</td><td class="valor"><b>${formatBRL(r.valorExtra)}</b></td></tr>`;
     }).join('');
     corpoHtml = `
