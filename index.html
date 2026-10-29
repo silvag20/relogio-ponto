@@ -893,7 +893,8 @@ function renderEspelho(){
       // Dia encerrado: se compensou no mesmo dia (saiu mais tarde), o atraso é só o que realmente faltou
       if(tipos['Saída'] || dataISO < hojeISO()){ const falt = Math.max(0, prevMin - trabMin); atrasoMin = falt > tol ? falt : 0; }
     }
-    totalTrab += trabMin; totalPrev += prevMin; totalExtra += extraMin; totalAtraso += atrasoMin; totalDom += domingoDia;
+    const hojeSemEntrada = (dataISO===hojeISO() && !tipos['Entrada'] && !aus);
+    totalTrab += trabMin; if(!hojeSemEntrada) totalPrev += prevMin; totalExtra += extraMin; totalAtraso += atrasoMin; totalDom += domingoDia;
     if(((aus && !ausJustificada) || parcialFechado) && !diaEspecial && dataISO<=hojeISO()) totalFolga += Math.max(0, prevMin - trabMin);
     if(regsDia.length===0 && prevMin===0 && !isDomingo && !isHoliday && !aus) continue;
     const podeEditar = currentUser.role==='admin';
@@ -1065,6 +1066,8 @@ function calcularResumoMensal(func, ano, mes){
     const regsDia = records.filter(r=>r.date===dataISO);
     if(settings.inicioControle && dataISO < settings.inicioControle && regsDia.length===0) continue;
     const tipos = {}; regsDia.forEach(r=>tipos[r.tipo]=r.hora);
+    // Hoje, antes da primeira marcação: o dia ainda não terminou, não conta como falta nem como horas previstas
+    if(dataISO===hojeStr && !tipos['Entrada'] && !ausenciaDoDia(func.id, dataISO)) continue;
     const isHoliday = holidays.has(dataISO);
     const diaSemana = new Date(dataISO+'T12:00:00').getDay();
     const diaEspecial = isHoliday || diaSemana===0;
