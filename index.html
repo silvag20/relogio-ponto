@@ -492,6 +492,7 @@ function renderDashboard(){
           let saldoMin = 0, gerado = 0;
           for(let a=dashDe.ano*12+dashDe.mes; a<=dashAte.ano*12+dashAte.mes; a++){
             const r = calcularResumoMensal(f, Math.floor(a/12), a%12);
+            if(a===dashDe.ano*12+dashDe.mes) saldoMin += r.saldoAnteriorMin - r.devedorAnteriorMin; // saldo que veio de antes do período
             gerado += r.domingoMin;
             saldoMin += r.extraGeradaMin + r.domingoMin - r.atrasoMesBrutoMin - r.folgaBancoMin;
           }
