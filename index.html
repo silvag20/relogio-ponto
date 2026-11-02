@@ -1117,7 +1117,8 @@ function calcularResumoMensal(func, ano, mes){
   let saldoAnteriorMin = 0, devedorAnteriorMin = 0;
   const mAnt = mes===0?11:mes-1, aAnt = mes===0?ano-1:ano;
   const primeiraMarc = records.reduce((m,r)=>(!m||r.date<m)?r.date:m, null);
-  if(primeiraMarc && (aAnt*12+mAnt) >= (parseInt(primeiraMarc.slice(0,4))*12+parseInt(primeiraMarc.slice(5,7))-1)){
+  // A transferência de saldo vale a partir de outubro → novembro/2026; meses anteriores ficam como estavam
+  if(ano*12+mes >= 2026*12+10 && primeiraMarc && (aAnt*12+mAnt) >= (parseInt(primeiraMarc.slice(0,4))*12+parseInt(primeiraMarc.slice(5,7))-1)){
     const rAnt = calcularResumoMensal(func, aAnt, mAnt);
     devedorAnteriorMin = rAnt.devedorProximoMin;
     const cAnt = dbGet('closures').find(c=>c.employeeId===func.id && c.ano===aAnt && c.mes===mAnt);
