@@ -1106,7 +1106,7 @@ function calcularResumoMensal(func, ano, mes){
       // Dia encerrado: se compensou no mesmo dia (saiu mais tarde), o atraso é só o que realmente faltou
       if(tipos['Saída'] || dataISO < hojeStr){ const falt = Math.max(0, prevDia - trabDia); atrasoDia = falt > (settings.toleranciaAtraso||0) ? falt : 0; }
       atrasoMin += atrasoDia;
-    } else if(prevDia>0 && diaSemana!==0 && diaSemana!==6 && !aus){
+    } else if(!tipos['Entrada'] && prevDia>0 && diaSemana!==0 && diaSemana!==6 && !aus){
       faltas++;
     }
   }
