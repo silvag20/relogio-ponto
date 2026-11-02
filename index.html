@@ -438,6 +438,8 @@ function abrirDetalheDashboard(tipo){
   abrirModal();
 }
 
+let dashDe = {mes:new Date().getMonth(), ano:new Date().getFullYear()};
+let dashAte = {mes:new Date().getMonth(), ano:new Date().getFullYear()};
 function renderDashboard(){
   const emp = dbGet('employees');
   const ativos = emp.filter(e=>e.status==='Ativo');
@@ -477,12 +479,23 @@ function renderDashboard(){
       <div class="stat-card clicavel" title="Clique para ver os nomes" onclick="abrirDetalheDashboard('abertas')"><div class="num">${ativos.length-fechadas}</div><div class="label">Folhas em aberto</div></div>
     </div>
     <div class="card">
-      <h3 style="margin-top:0">🏆 Ranking de Horas Extras — ${nomeMes(mesAtual)}/${anoAtual}</h3>
-      <p style="color:var(--cinza);font-size:0.8rem;margin:-6px 0 14px">Saldo do mês (extras − atrasos). Em vermelho: colaboradores com saldo negativo.</p>
+      <h3 style="margin-top:0">🏆 Ranking de Horas — ${nomeMes(dashDe.mes)}/${dashDe.ano}${(dashDe.mes!==dashAte.mes||dashDe.ano!==dashAte.ano)?` a ${nomeMes(dashAte.mes)}/${dashAte.ano}`:''}</h3>
+      <div class="filtros" style="margin-bottom:8px">
+        <div><label>De</label><select onchange="dashDe.mes=parseInt(this.value); renderDashboard()">${[...Array(12).keys()].map(m=>`<option value="${m}" ${m===dashDe.mes?'selected':''}>${nomeMes(m)}</option>`).join('')}</select></div>
+        <div><label>Ano</label><input type="number" value="${dashDe.ano}" style="width:90px" onchange="dashDe.ano=parseInt(this.value); renderDashboard()"></div>
+        <div><label>Até</label><select onchange="dashAte.mes=parseInt(this.value); renderDashboard()">${[...Array(12).keys()].map(m=>`<option value="${m}" ${m===dashAte.mes?'selected':''}>${nomeMes(m)}</option>`).join('')}</select></div>
+        <div><label>Ano</label><input type="number" value="${dashAte.ano}" style="width:90px" onchange="dashAte.ano=parseInt(this.value); renderDashboard()"></div>
+      </div>
+      <p style="color:var(--cinza);font-size:0.8rem;margin:-6px 0 14px">Saldo gerado no período (extras 50% + domingos/feriados 100% − atrasos − folgas). Em vermelho: saldo negativo.</p>
       ${(() => {
         const ranking = ativos.map(f=>{
-          const r = calcularResumoMensal(f, anoAtual, mesAtual);
-          return {nome:f.nome, saldoMin:r.extraTotalMin - r.atrasoMin - r.folgaSemSaldoMin};
+          let saldoMin = 0, gerado = 0;
+          for(let a=dashDe.ano*12+dashDe.mes; a<=dashAte.ano*12+dashAte.mes; a++){
+            const r = calcularResumoMensal(f, Math.floor(a/12), a%12);
+            gerado += r.extraGeradaMin + r.domingoMin;
+            saldoMin += r.extraGeradaMin + r.domingoMin - r.atrasoMesBrutoMin - r.folgaBancoMin;
+          }
+          return {nome:f.nome, saldoMin, gerado};
         }).sort((a,b)=> b.saldoMin - a.saldoMin);
         if(ranking.length===0) return '<p style="color:var(--cinza)">Nenhum colaborador cadastrado.</p>';
         const maior = Math.max(1, ...ranking.map(i=>Math.abs(i.saldoMin)));
@@ -1099,7 +1112,20 @@ function calcularResumoMensal(func, ano, mes){
   const valorHora = func.salario / (func.cargaMensal||220);
   const valorMinuto = valorHora / 60;
   // Banco de horas: as horas extras abatem os atrasos do mês (compensação)
-  const extraBrutoMin = extraMin, atrasoBrutoMin = atrasoMin;
+  const extraGeradaMin = extraMin, atrasoMesBrutoMin = atrasoMin;
+  // Saldo vindo do mês anterior: positivo (extras não pagas, definido no fechamento) ou devedor (automático)
+  let saldoAnteriorMin = 0, devedorAnteriorMin = 0;
+  const mAnt = mes===0?11:mes-1, aAnt = mes===0?ano-1:ano;
+  const primeiraMarc = records.reduce((m,r)=>(!m||r.date<m)?r.date:m, null);
+  if(primeiraMarc && (aAnt*12+mAnt) >= (parseInt(primeiraMarc.slice(0,4))*12+parseInt(primeiraMarc.slice(5,7))-1)){
+    const rAnt = calcularResumoMensal(func, aAnt, mAnt);
+    devedorAnteriorMin = rAnt.devedorProximoMin;
+    const cAnt = dbGet('closures').find(c=>c.employeeId===func.id && c.ano===aAnt && c.mes===mAnt);
+    if(cAnt && cAnt.horasPagasMin!=null) saldoAnteriorMin = rAnt.saldoProximoMin;
+  }
+  atrasoMin += devedorAnteriorMin;
+  const extraBrutoMin = extraMin + saldoAnteriorMin, atrasoBrutoMin = atrasoMin;
+  extraMin = extraBrutoMin;
   // Folgas programadas abatem primeiro; o que sobrar das extras abate os atrasos
   const folgaCompensadaMin = Math.min(extraBrutoMin, folgaBancoMin);
   const compAtrasoMin = Math.min(extraBrutoMin - folgaCompensadaMin, atrasoBrutoMin);
@@ -1108,20 +1134,18 @@ function calcularResumoMensal(func, ano, mes){
   extraMin = extraBrutoMin - compensadoMin;
   atrasoMin = atrasoBrutoMin - compAtrasoMin;
   // Fechamento: o RH define quantas horas positivas serão pagas; o que sobrar vai para o mês seguinte
-  let saldoAnteriorMin = 0;
-  const mAnt = mes===0?11:mes-1, aAnt = mes===0?ano-1:ano;
-  const closAll = dbGet('closures');
-  const cAnt = closAll.find(c=>c.employeeId===func.id && c.ano===aAnt && c.mes===mAnt);
-  if(cAnt && cAnt.horasPagasMin!=null) saldoAnteriorMin = calcularResumoMensal(func, aAnt, mAnt).saldoProximoMin;
-  const disponivelMin = extraMin + saldoAnteriorMin;
-  const cAtual = closAll.find(c=>c.employeeId===func.id && c.ano===ano && c.mes===mes);
+  const disponivelMin = extraMin;
+  extraMin = Math.max(0, disponivelMin - saldoAnteriorMin);
+  const cAtual = dbGet('closures').find(c=>c.employeeId===func.id && c.ano===ano && c.mes===mes);
   const fechadoComHoras = !!(cAtual && cAtual.horasPagasMin!=null);
   const extraPagaMin = fechadoComHoras ? Math.min(cAtual.horasPagasMin, disponivelMin) : disponivelMin;
   const saldoProximoMin = disponivelMin - extraPagaMin;
+  const devedorProximoMin = atrasoMin + folgaSemSaldoMin;
+  const saldoBancoMin = disponivelMin - devedorProximoMin;
   const valorExtra50 = extraPagaMin * valorMinuto * (1 + (settings.percentualExtra||50)/100);
   const valorExtra100 = domingoMin * valorMinuto * (1 + (settings.percentualExtraFeriado||100)/100);
   const valorExtra = valorExtra50 + valorExtra100;
-  return {extraPagaMin, saldoAnteriorMin, disponivelMin, saldoProximoMin, fechadoComHoras, valorExtra50, valorExtra100, trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraPagaMin+domingoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, folgaBancoMin, folgaCompensadaMin, folgaSemSaldoMin, faltas, valorHora, valorMinuto, valorExtra};
+  return {extraGeradaMin, atrasoMesBrutoMin, devedorAnteriorMin, devedorProximoMin, saldoBancoMin, extraPagaMin, saldoAnteriorMin, disponivelMin, saldoProximoMin, fechadoComHoras, valorExtra50, valorExtra100, trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraPagaMin+domingoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, folgaBancoMin, folgaCompensadaMin, folgaSemSaldoMin, faltas, valorHora, valorMinuto, valorExtra};
 }
 
 function renderHorasExtras(){
@@ -1131,18 +1155,24 @@ function renderHorasExtras(){
     <h1>Horas Extras (${nomeMes(mes)}/${ano})</h1>
     <div class="card">
       <table>
-        <thead><tr><th>Colaborador</th><th>Extras 50%</th><th>Extras 100% (dom/feriado)</th><th>Valor Hora</th><th>Valor 50%</th><th>Valor 100%</th><th>Valor Total</th></tr></thead>
+        <thead><tr><th>Colaborador</th><th>Extras 50%</th><th>Extras 100% (dom/feriado)</th><th>Valor Hora</th><th>Valor 50%</th><th>Valor 100%</th><th>Valor Total</th><th>Saldo anterior</th><th>Saldo p/ próx. mês</th></tr></thead>
         <tbody>
           ${emp.map(f=>{
             const r = calcularResumoMensal(f, ano, mes);
+            const ant = r.saldoAnteriorMin - r.devedorAnteriorMin;
+            const prox = r.saldoProximoMin - r.devedorProximoMin;
             return `<tr><td>${f.nome}</td><td>${minParaHora(r.extraPagaMin)}</td><td>${minParaHora(r.domingoMin)}</td><td>${formatBRL(r.valorHora)}</td>
-              <td>${formatBRL(r.valorExtra50)}</td><td>${formatBRL(r.valorExtra100)}</td><td><b>${formatBRL(r.valorExtra)}</b></td></tr>`;
-          }).join('') || '<tr><td colspan="7" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
+              <td>${formatBRL(r.valorExtra50)}</td><td>${formatBRL(r.valorExtra100)}</td><td><b>${formatBRL(r.valorExtra)}</b></td>
+              <td style="color:${ant<0?'var(--vermelho)':'inherit'}">${fmtSaldo(ant)}</td>
+              <td style="color:${prox<0?'var(--vermelho)':'inherit'};font-weight:600">${fmtSaldo(prox)}</td></tr>`;
+          }).join('') || '<tr><td colspan="9" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
         </tbody>
       </table>
+      <p style="color:var(--cinza);font-size:0.8rem">Saldo negativo (devedor) é transferido automaticamente para o mês seguinte e abatido das próximas horas extras. Saldo positivo não pago no fechamento também passa para o mês seguinte.</p>
     </div>
   `;
 }
+function fmtSaldo(min){ return (min>0?'+':'')+minParaHora(min); }
 
 function renderBancoHoras(){
   const isFunc = currentUser.role==='funcionario';
@@ -1152,13 +1182,17 @@ function renderBancoHoras(){
     <h1>${isFunc?'Meu Banco de Horas':'Banco de Horas'}</h1>
     <div class="card">
       <table>
-        <thead><tr><th>Colaborador</th><th>Horas Trabalhadas</th><th>Horas Previstas</th><th>Compensado (extras − atrasos)</th><th>Saldo do Mês</th></tr></thead>
+        <thead><tr><th>Colaborador</th><th>Horas Trabalhadas</th><th>Horas Previstas</th><th>Saldo anterior</th><th>Compensado (extras − atrasos)</th><th>Saldo do Mês</th><th>Saldo acumulado (passa p/ próx. mês)</th></tr></thead>
         <tbody>
           ${emp.map(f=>{
             const r = calcularResumoMensal(f, ano, mes);
             const saldo = (r.trabalhadoMin - r.abertoHojeMin - r.domingoMin) - r.previstoMin;
-            return `<tr><td>${f.nome}</td><td>${minParaHora(r.trabalhadoMin)}</td><td>${minParaHora(r.previstoMin)}</td><td>${minParaHora(r.compensadoMin)}</td>
-              <td style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'};font-weight:600">${saldo>=0?'+':''}${minParaHora(saldo)}</td></tr>`;
+            const ant = r.saldoAnteriorMin - r.devedorAnteriorMin;
+            const acum = r.saldoBancoMin;
+            return `<tr><td>${f.nome}</td><td>${minParaHora(r.trabalhadoMin)}</td><td>${minParaHora(r.previstoMin)}</td>
+              <td style="color:${ant<0?'var(--vermelho)':'inherit'}">${fmtSaldo(ant)}</td><td>${minParaHora(r.compensadoMin)}</td>
+              <td style="color:${saldo>=0?'var(--verde)':'var(--vermelho)'};font-weight:600">${saldo>=0?'+':''}${minParaHora(saldo)}</td>
+              <td style="color:${acum>=0?'var(--verde)':'var(--vermelho)'};font-weight:700">${fmtSaldo(acum)}</td></tr>`;
           }).join('') || '<tr><td colspan="7" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
         </tbody>
       </table>
@@ -1173,14 +1207,16 @@ function renderAtrasos(){
     <h1>Atrasos e Faltas (${nomeMes(mes)}/${ano})</h1>
     <div class="card">
       <table>
-        <thead><tr><th>Colaborador</th><th>Total de Atrasos</th><th>Faltas no Mês</th></tr></thead>
+        <thead><tr><th>Colaborador</th><th>Devedor do mês anterior</th><th>Total de Atrasos (c/ anterior)</th><th>Faltas no Mês</th><th>Passa p/ próx. mês</th></tr></thead>
         <tbody>
           ${emp.map(f=>{
             const r = calcularResumoMensal(f, ano, mes);
             return `<tr><td>${f.nome}</td>
+              <td style="color:${r.devedorAnteriorMin>0?'var(--vermelho)':'inherit'}">${minParaHora(r.devedorAnteriorMin)}</td>
               <td style="color:${r.atrasoMin>0?'var(--vermelho)':'inherit'}">${minParaHora(r.atrasoMin)}</td>
-              <td style="color:${r.faltas>0?'var(--vermelho)':'inherit'}">${r.faltas}</td></tr>`;
-          }).join('') || '<tr><td colspan="3" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
+              <td style="color:${r.faltas>0?'var(--vermelho)':'inherit'}">${r.faltas}</td>
+              <td style="color:${r.devedorProximoMin>0?'var(--vermelho)':'inherit'};font-weight:600">${minParaHora(r.devedorProximoMin)}</td></tr>`;
+          }).join('') || '<tr><td colspan="5" style="color:var(--cinza)">Nenhum colaborador.</td></tr>'}
         </tbody>
       </table>
     </div>
@@ -1365,7 +1401,7 @@ function fecharFolha(employeeId, ano, mes){
     <table><tbody>
       <tr><td>Horas extras do mês (líquidas)</td><td class="valor">${minParaHora(r.extraMin)}</td></tr>
       <tr><td>Saldo vindo do mês anterior</td><td class="valor">${minParaHora(r.saldoAnteriorMin)}</td></tr>
-      <tr><td><b>Disponível para pagar</b></td><td class="valor"><b>${minParaHora(r.disponivelMin)}</b></td></tr>
+      <tr><td><b>Disponível para pagar</b> <small style="color:var(--cinza)">(já abatidos atrasos e devedor anterior)</small></td><td class="valor"><b>${minParaHora(r.disponivelMin)}</b></td></tr>
       <tr><td>Extras 100% (domingos/feriados) — pagas integralmente</td><td class="valor">${minParaHora(r.domingoMin)}</td></tr>
     </tbody></table>
     <label style="margin-top:12px">Horas extras (${dbGet('settings').percentualExtra}%) a pagar neste mês (HH:MM)</label>
