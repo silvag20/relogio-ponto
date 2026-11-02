@@ -209,10 +209,22 @@ function mapSettingsFromDB(row){
 }
 
 /* Carrega todas as tabelas do Supabase para o estado local */
+// O Supabase devolve no máximo 1000 linhas por consulta: busca as marcações em páginas para não perder nenhuma
+async function buscarTodasMarcacoes(){
+  let todas = [], de = 0; const passo = 1000;
+  while(true){
+    const { data, error } = await sb.from('time_records').select('*').order('id').range(de, de+passo-1);
+    if(error) return { data: todas, error };
+    todas = todas.concat(data||[]);
+    if(!data || data.length < passo) break;
+    de += passo;
+  }
+  return { data: todas, error: null };
+}
 async function carregarTudo(){
   const [empRes, recRes, holRes, setRes, corRes, audRes, cloRes, usrRes, ausRes] = await Promise.all([
     sb.from('employees').select('*').order('nome'),
-    sb.from('time_records').select('*'),
+    buscarTodasMarcacoes(),
     sb.from('holidays').select('*'),
     sb.from('settings').select('*').limit(1).maybeSingle(),
     sb.from('corrections').select('*'),
