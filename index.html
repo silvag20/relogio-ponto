@@ -486,14 +486,14 @@ function renderDashboard(){
         <div><label>Até</label><select onchange="dashAte.mes=parseInt(this.value); renderDashboard()">${[...Array(12).keys()].map(m=>`<option value="${m}" ${m===dashAte.mes?'selected':''}>${nomeMes(m)}</option>`).join('')}</select></div>
         <div><label>Ano</label><input type="number" value="${dashAte.ano}" style="width:90px" onchange="dashAte.ano=parseInt(this.value); renderDashboard()"></div>
       </div>
-      <p style="color:var(--cinza);font-size:0.8rem;margin:-6px 0 14px">Saldo do banco de horas no período (extras − atrasos − folgas). Domingos e feriados trabalhados não entram no banco: são pagos à parte a 100% e aparecem ao lado do nome. Em vermelho: saldo negativo.</p>
+      <p style="color:var(--cinza);font-size:0.8rem;margin:-6px 0 14px">Todas as horas positivas (extras 50% + domingos/feriados 100%) menos as horas negativas (atrasos e folgas) no período. O valor de domingo/feriado incluído aparece ao lado do nome. Em vermelho: saldo negativo.</p>
       ${(() => {
         const ranking = ativos.map(f=>{
           let saldoMin = 0, gerado = 0;
           for(let a=dashDe.ano*12+dashDe.mes; a<=dashAte.ano*12+dashAte.mes; a++){
             const r = calcularResumoMensal(f, Math.floor(a/12), a%12);
             gerado += r.domingoMin;
-            saldoMin += r.extraGeradaMin - r.atrasoMesBrutoMin - r.folgaBancoMin;
+            saldoMin += r.extraGeradaMin + r.domingoMin - r.atrasoMesBrutoMin - r.folgaBancoMin;
           }
           return {nome:f.nome, saldoMin, gerado};
         }).sort((a,b)=> b.saldoMin - a.saldoMin);
@@ -505,7 +505,7 @@ function renderDashboard(){
           const cor = neg ? 'var(--vermelho)' : (i===0 && item.saldoMin>0 ? 'var(--amarelo)' : 'var(--azul)');
           return `<div style="margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:3px">
-              <span>${i===0 && item.saldoMin>0 ? '🥇 ' : ''}${item.nome}${item.gerado>0?` <small style="color:var(--cinza)">· 100%: ${minParaHora(item.gerado)}</small>`:''}</span>
+              <span>${i===0 && item.saldoMin>0 ? '🥇 ' : ''}${item.nome}${item.gerado>0?` <small style="color:var(--cinza)">· inclui 100%: ${minParaHora(item.gerado)}</small>`:''}</span>
               <span style="font-weight:600;color:${neg?'var(--vermelho)':'inherit'}">${neg?'-':''}${minParaHora(Math.abs(item.saldoMin))}</span>
             </div>
             <div style="background:#e2e8f0;border-radius:6px;height:10px;">
