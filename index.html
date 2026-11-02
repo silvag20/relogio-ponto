@@ -1155,7 +1155,18 @@ function calcularResumoMensal(func, ano, mes){
   const valorExtra50 = extraPagaMin * valorMinuto * (1 + (settings.percentualExtra||50)/100);
   const valorExtra100 = domingoPagoMin * valorMinuto * (1 + (settings.percentualExtraFeriado||100)/100);
   const valorExtra = valorExtra50 + valorExtra100;
-  return {domingoPagoMin, domingoAbatidoMin, extraGeradaMin, atrasoMesBrutoMin, devedorAnteriorMin, devedorProximoMin, saldoBancoMin, extraPagaMin, saldoAnteriorMin, disponivelMin, saldoProximoMin, fechadoComHoras, valorExtra50, valorExtra100, trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraPagaMin+domingoPagoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, folgaBancoMin, folgaCompensadaMin, folgaSemSaldoMin, faltas, valorHora, valorMinuto, valorExtra};
+  // Férias no mês: dias corridos de férias dentro do mês (base 30 dias); pagos à parte, na folha de férias
+  let diasFerias = 0;
+  dbGet('absences').filter(a=>a.employeeId===func.id && a.tipo==='Férias').forEach(a=>{
+    for(let d=1; d<=dias; d++){
+      const di = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      if(di>=a.inicio && di<=a.fim) diasFerias++;
+    }
+  });
+  diasFerias = Math.min(diasFerias, 30);
+  const valorFerias = (func.salario/30) * diasFerias;
+  const salarioMes = func.salario - valorFerias;
+  return {diasFerias, valorFerias, salarioMes, domingoPagoMin, domingoAbatidoMin, extraGeradaMin, atrasoMesBrutoMin, devedorAnteriorMin, devedorProximoMin, saldoBancoMin, extraPagaMin, saldoAnteriorMin, disponivelMin, saldoProximoMin, fechadoComHoras, valorExtra50, valorExtra100, trabalhadoMin, abertoHojeMin, previstoMin, extraMin, domingoMin, extraTotalMin: extraPagaMin+domingoPagoMin, atrasoMin, extraBrutoMin, atrasoBrutoMin, compensadoMin, folgaBancoMin, folgaCompensadaMin, folgaSemSaldoMin, faltas, valorHora, valorMinuto, valorExtra};
 }
 
 function renderHorasExtras(){
@@ -1287,7 +1298,7 @@ function abrirDetalhesFolha(employeeId, ano, mes){
   const descontoAtraso = r.atrasoMin * r.valorMinuto;
   const horasDiaPrevistas = horasPrevistasDia(f);
   const descontoFaltas = r.faltas * (horasDiaPrevistas * r.valorMinuto);
-  const totalPagar = f.salario + r.valorExtra;
+  const totalPagar = r.salarioMes + r.valorExtra;
 
   document.getElementById('modalBox').innerHTML = `
     <h2>Detalhes da Folha — ${f.nome}</h2>
@@ -1295,6 +1306,8 @@ function abrirDetalhesFolha(employeeId, ano, mes){
     <table>
       <tbody>
         <tr><td>Salário base</td><td class="valor">${formatBRL(f.salario)}</td></tr>
+        ${r.diasFerias>0?`<tr><td>Férias no mês: ${r.diasFerias} dia(s) — pagas à parte, na folha de férias</td><td class="valor" style="color:var(--vermelho)">- ${formatBRL(r.valorFerias)}</td></tr>
+        <tr><td>Salário proporcional (${30-r.diasFerias} dias)</td><td class="valor">${formatBRL(r.salarioMes)}</td></tr>`:''}
         <tr><td>Carga horária mensal</td><td class="valor">${f.cargaMensal}h</td></tr>
         <tr><td>Valor da hora normal</td><td class="valor">${formatBRL(r.valorHora)}</td></tr>
         <tr><td>Horas previstas no período</td><td class="valor">${minParaHora(r.previstoMin)}</td></tr>
@@ -1334,7 +1347,7 @@ function gerarDemonstrativo(employeeId, ano, mes){
   const s = dbGet('settings');
   const closures = dbGet('closures');
   const fechamento = closures.find(c=>c.employeeId===employeeId && c.ano===ano && c.mes===mes);
-  const totalProventos = f.salario + r.valorExtra;
+  const totalProventos = r.salarioMes + r.valorExtra;
   const hoje = new Date();
 
   document.getElementById('content').innerHTML = `
@@ -1368,7 +1381,7 @@ function gerarDemonstrativo(employeeId, ano, mes){
         <table>
           <thead><tr><th>Descrição</th><th>Referência</th><th class="valor">Valor</th></tr></thead>
           <tbody>
-            <tr><td>Salário base</td><td>${f.cargaMensal}h</td><td class="valor">${formatBRL(f.salario)}</td></tr>
+            <tr><td>${r.diasFerias>0?`Salário base (proporcional a ${30-r.diasFerias} dias; ${r.diasFerias} dias de férias pagos à parte)`:'Salário base'}</td><td>${f.cargaMensal}h</td><td class="valor">${formatBRL(r.salarioMes)}</td></tr>
             ${r.extraPagaMin>0?`<tr><td>Horas extras ${s.percentualExtra}%</td><td>${minParaHora(r.extraPagaMin)}</td><td class="valor">${formatBRL(r.valorExtra50)}</td></tr>`:''}
             ${r.domingoPagoMin>0?`<tr><td>Horas extras ${s.percentualExtraFeriado}% (domingos e feriados)</td><td>${minParaHora(r.domingoPagoMin)}</td><td class="valor">${formatBRL(r.valorExtra100)}</td></tr>`:''}
           </tbody>
@@ -1561,7 +1574,7 @@ function renderResultadoRelatorio(tipo, funcId, ano, mes){
     const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
       const fechada = closures.find(c=>c.employeeId===f.id && c.ano===ano && c.mes===mes);
-      const bruto = f.salario + r.valorExtra;
+      const bruto = r.salarioMes + r.valorExtra;
       totalBruto += bruto;
       return `<tr>
         <td>${f.nome}</td><td>${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
@@ -1641,7 +1654,7 @@ function gerarRelatorioPDF(){
     const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
       const fechada = closures.find(c=>c.employeeId===f.id && c.ano===ano && c.mes===mes);
-      const bruto = f.salario + r.valorExtra;
+      const bruto = r.salarioMes + r.valorExtra;
       totalBruto += bruto;
       return `<tr>
         <td>${f.nome}</td><td class="valor">${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
