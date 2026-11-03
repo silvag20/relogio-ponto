@@ -240,7 +240,7 @@ async function carregarTudo(){
   state.corrections = (corRes.data||[]).map(mapCorrectionFromDB);
   state.audit = (audRes.data||[]).map(a=>({data:a.created_at, usuario:a.usuario_nome, acao:a.acao}));
   state.closures = (cloRes.data||[]).map(c=>({employeeId:c.employee_id, ano:c.ano, mes:c.mes, fechadoPor:c.fechado_por, data:c.fechado_em, horasPagasMin:c.horas_pagas_min}));
-  state.absences = (ausRes.data||[]).map(a=>({id:a.id, employeeId:a.employee_id, tipo:a.tipo, inicio:a.data_inicio, fim:a.data_fim, obs:a.observacao||'', criadoPor:a.criado_por||''}));
+  state.absences = (ausRes.data||[]).map(a=>({id:a.id, employeeId:a.employee_id, tipo:a.tipo, inicio:a.data_inicio, fim:a.data_fim, obs:a.observacao||'', criadoPor:a.criado_por||'', inss:a.inss, irrf:a.irrf}));
   try{ const pr = await sb.rpc('employees_with_pin'); state.pins = Array.isArray(pr.data) ? pr.data : []; }catch(e){ state.pins = []; }
   let emailsPorId = {};
   try{
@@ -1311,7 +1311,7 @@ function abrirDetalhesFolha(employeeId, ano, mes){
   const descontoAtraso = r.atrasoMin * r.valorMinuto;
   const horasDiaPrevistas = horasPrevistasDia(f);
   const descontoFaltas = r.faltas * (horasDiaPrevistas * r.valorMinuto);
-  const totalPagar = r.salarioMes + r.valorExtra + r.valorFerias + r.tercoFerias;
+  const totalPagar = r.salarioMes + r.valorExtra;
 
   document.getElementById('modalBox').innerHTML = `
     <h2>Detalhes da Folha — ${f.nome}</h2>
@@ -1321,8 +1321,7 @@ function abrirDetalhesFolha(employeeId, ano, mes){
         <tr><td>Salário base</td><td class="valor">${formatBRL(f.salario)}</td></tr>
         ${r.diasFerias>0?`<tr><td>Dias de férias no mês: ${r.diasFerias} (saem do salário)</td><td class="valor" style="color:var(--vermelho)">- ${formatBRL(r.valorFerias)}</td></tr>
         <tr><td>Salário proporcional (${30-r.diasFerias} dias)</td><td class="valor">${formatBRL(r.salarioMes)}</td></tr>
-        <tr><td>Férias (${r.diasFerias} dias)</td><td class="valor">${formatBRL(r.valorFerias)}</td></tr>
-        <tr><td>1/3 constitucional de férias</td><td class="valor">${formatBRL(r.tercoFerias)}</td></tr>`:''}
+        <tr><td>Férias (${r.diasFerias} dias) + 1/3 — já pagas no recibo de férias</td><td class="valor" style="color:var(--cinza)">${formatBRL(r.valorFerias+r.tercoFerias)} (não soma)</td></tr>`:''}
         <tr><td>Carga horária mensal</td><td class="valor">${f.cargaMensal}h</td></tr>
         <tr><td>Valor da hora normal</td><td class="valor">${formatBRL(r.valorHora)}</td></tr>
         <tr><td>Horas previstas no período</td><td class="valor">${minParaHora(r.previstoMin)}</td></tr>
@@ -1343,7 +1342,7 @@ function abrirDetalhesFolha(employeeId, ano, mes){
     </table>
     <div class="aviso" style="margin-top:14px">⚠️ Os descontos de atraso/falta mostrados aqui são estimativas baseadas no valor-hora, para referência. Aplique-os conforme a política da empresa e a legislação — este total não é subtraído automaticamente do valor a pagar abaixo.</div>
     <div class="holerite-total" style="margin-top:10px">
-      <div class="item"><div class="lbl">Total a pagar (salário + férias + extras)</div><div class="val">${formatBRL(totalPagar)}</div></div>
+      <div class="item"><div class="lbl">Total a pagar (salário proporcional + extras)</div><div class="val">${formatBRL(totalPagar)}</div></div>
     </div>
     <div class="modal-acoes">
       <button class="btn btn-cinza" onclick="fecharModal()">Fechar</button>
@@ -1362,7 +1361,7 @@ function gerarDemonstrativo(employeeId, ano, mes){
   const s = dbGet('settings');
   const closures = dbGet('closures');
   const fechamento = closures.find(c=>c.employeeId===employeeId && c.ano===ano && c.mes===mes);
-  const totalProventos = r.salarioMes + r.valorExtra + r.valorFerias + r.tercoFerias;
+  const totalProventos = r.salarioMes + r.valorExtra;
   const hoje = new Date();
 
   document.getElementById('content').innerHTML = `
@@ -1397,8 +1396,7 @@ function gerarDemonstrativo(employeeId, ano, mes){
           <thead><tr><th>Descrição</th><th>Referência</th><th class="valor">Valor</th></tr></thead>
           <tbody>
             <tr><td>${r.diasFerias>0?`Salário base (proporcional a ${30-r.diasFerias} dias)`:'Salário base'}</td><td>${f.cargaMensal}h</td><td class="valor">${formatBRL(r.salarioMes)}</td></tr>
-            ${r.diasFerias>0?`<tr><td>Férias</td><td>${r.diasFerias} dias</td><td class="valor">${formatBRL(r.valorFerias)}</td></tr>
-            <tr><td>1/3 constitucional de férias</td><td></td><td class="valor">${formatBRL(r.tercoFerias)}</td></tr>`:''}
+            ${r.diasFerias>0?`<tr><td>Férias (${r.diasFerias} dias) + 1/3 — já pagas no recibo de férias, não somam neste demonstrativo</td><td></td><td class="valor" style="color:#64748b">(${formatBRL(r.valorFerias+r.tercoFerias)})</td></tr>`:''}
             ${r.extraPagaMin>0?`<tr><td>Horas extras ${s.percentualExtra}%</td><td>${minParaHora(r.extraPagaMin)}</td><td class="valor">${formatBRL(r.valorExtra50)}</td></tr>`:''}
             ${r.domingoPagoMin>0?`<tr><td>Horas extras ${s.percentualExtraFeriado}% (domingos e feriados)</td><td>${minParaHora(r.domingoPagoMin)}</td><td class="valor">${formatBRL(r.valorExtra100)}</td></tr>`:''}
           </tbody>
@@ -1591,7 +1589,7 @@ function renderResultadoRelatorio(tipo, funcId, ano, mes){
     const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
       const fechada = closures.find(c=>c.employeeId===f.id && c.ano===ano && c.mes===mes);
-      const bruto = r.salarioMes + r.valorExtra + r.valorFerias + r.tercoFerias;
+      const bruto = r.salarioMes + r.valorExtra;
       totalBruto += bruto;
       return `<tr>
         <td>${f.nome}</td><td>${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
@@ -1671,7 +1669,7 @@ function gerarRelatorioPDF(){
     const linhas = funcs.map(f=>{
       const r = calcularResumoMensal(f, ano, mes);
       const fechada = closures.find(c=>c.employeeId===f.id && c.ano===ano && c.mes===mes);
-      const bruto = r.salarioMes + r.valorExtra + r.valorFerias + r.tercoFerias;
+      const bruto = r.salarioMes + r.valorExtra;
       totalBruto += bruto;
       return `<tr>
         <td>${f.nome}</td><td class="valor">${formatBRL(f.salario)}</td><td>${minParaHora(r.trabalhadoMin)}</td>
@@ -1742,7 +1740,7 @@ function renderAusencias(){
         <thead><tr><th>Colaborador</th><th>Tipo</th><th>Período</th><th>Dias</th><th>Situação</th><th>Observação</th><th></th></tr></thead>
         <tbody>${lista.map(a=>`<tr><td>${nomeDe(a.employeeId)}</td><td>${a.tipo}</td>
           <td>${formatDataBR(a.inicio)} a ${formatDataBR(a.fim)}</td><td>${dias(a)}</td><td>${situacao(a)}</td><td>${a.obs||''}</td>
-          <td><button class="icon-btn del" onclick="excluirAusencia('${a.id}')">Excluir</button></td></tr>`).join('') || '<tr><td colspan="7" style="color:var(--cinza)">Nenhuma ausência cadastrada.</td></tr>'}
+          <td style="white-space:nowrap">${a.tipo==='Férias'?`<button class="icon-btn" onclick="abrirReciboFerias('${a.id}')">🧾 Recibo</button> `:''}<button class="icon-btn del" onclick="excluirAusencia('${a.id}')">Excluir</button></td></tr>`).join('') || '<tr><td colspan="7" style="color:var(--cinza)">Nenhuma ausência cadastrada.</td></tr>'}
         </tbody>
       </table>
     </div>
@@ -1756,10 +1754,98 @@ async function salvarAusencia(){
   if(conflito){ alert(`Já existe "${conflito.tipo}" de ${formatDataBR(conflito.inicio)} a ${formatDataBR(conflito.fim)} para este colaborador no mesmo período. Exclua ou ajuste antes de lançar outra.`); return; }
   const { data, error } = await sb.from('absences').insert({employee_id:employeeId, tipo, data_inicio:ini, data_fim:fim, observacao:obs||null, criado_por:currentUser.nome}).select().single();
   if(error){ alert('Erro ao salvar: '+error.message); return; }
-  state.absences.push({id:data.id, employeeId, tipo, inicio:ini, fim, obs, criadoPor:currentUser.nome});
+  state.absences.push({id:data.id, employeeId, tipo, inicio:ini, fim, obs, criadoPor:currentUser.nome, inss:null, irrf:null});
   const f = dbGet('employees').find(e=>e.id===employeeId);
   logAudit(`${tipo} lançada para ${f?f.nome:employeeId}: ${formatDataBR(ini)} a ${formatDataBR(fim)}${obs?' ('+obs+')':''}`);
+  if(tipo==='Férias'){ abrirReciboFerias(data.id); return; }
   renderAusencias();
+}
+function calcularFerias(a, f){
+  const dias = Math.round((new Date(a.fim+'T12:00:00') - new Date(a.inicio+'T12:00:00'))/86400000)+1;
+  const valor = (f.salario/30) * dias;
+  const terco = valor/3;
+  const bruto = valor + terco;
+  const inss = a.inss||0, irrf = a.irrf||0;
+  return {dias, valor, terco, bruto, inss, irrf, liquido: bruto - inss - irrf};
+}
+function abrirReciboFerias(id){
+  const a = dbGet('absences').find(x=>x.id===id); if(!a) return;
+  const f = dbGet('employees').find(e=>e.id===a.employeeId); if(!f) return;
+  const c = calcularFerias(a, f);
+  const st = dbGet('settings');
+  const num = v => (v||v===0) ? String(Number(v).toFixed(2)).replace('.',',') : '';
+  document.getElementById('content').innerHTML = `
+    <div class="holerite-acoes no-print">
+      <button class="btn btn-cinza" onclick="renderAusencias()">← Voltar</button>
+      <button class="btn btn-azul" onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
+    </div>
+    <div class="card no-print">
+      <h3 style="margin-top:0">Descontos do recibo (lançamento manual)</h3>
+      <div class="form-grid">
+        <div><label>INSS (R$)</label><input id="feriasInss" value="${num(a.inss)}" placeholder="0,00"></div>
+        <div><label>IRRF (R$)</label><input id="feriasIrrf" value="${num(a.irrf)}" placeholder="0,00"></div>
+      </div>
+      <div style="margin-top:12px"><button class="btn btn-azul" onclick="salvarDescontosFerias('${a.id}')">Salvar descontos</button></div>
+    </div>
+    <div id="areaImpressao">
+      <div class="holerite">
+        <div class="holerite-topo">
+          <div><h2>${st.empresa || 'Empresa'}</h2><div class="periodo">Recibo de Férias</div></div>
+          <div class="periodo" style="text-align:right">Período de gozo: <b>${formatDataBR(a.inicio)} a ${formatDataBR(a.fim)}</b><br>Emitido em: ${new Date().toLocaleDateString('pt-BR')}</div>
+        </div>
+        <div class="holerite-dados">
+          <div><span>Colaborador</span>${f.nome}</div>
+          <div><span>Cargo</span>${f.cargo||'-'}</div>
+          <div><span>CPF</span>${f.cpf||'-'}</div>
+          <div><span>Setor</span>${f.setor||'-'}</div>
+          <div><span>Matrícula</span>${f.matricula||'-'}</div>
+          <div><span>Admissão</span>${formatDataBR(f.admissao)||'-'}</div>
+        </div>
+        <div class="holerite-secao-titulo">Proventos</div>
+        <table>
+          <thead><tr><th>Descrição</th><th>Referência</th><th class="valor">Valor</th></tr></thead>
+          <tbody>
+            <tr><td>Férias (salário ${formatBRL(f.salario)} ÷ 30 × dias)</td><td>${c.dias} dias</td><td class="valor">${formatBRL(c.valor)}</td></tr>
+            <tr><td>1/3 constitucional de férias</td><td></td><td class="valor">${formatBRL(c.terco)}</td></tr>
+          </tbody>
+        </table>
+        <div class="holerite-secao-titulo">Descontos</div>
+        <table>
+          <thead><tr><th>Descrição</th><th></th><th class="valor">Valor</th></tr></thead>
+          <tbody>
+            <tr><td>INSS</td><td></td><td class="valor">${formatBRL(c.inss)}</td></tr>
+            <tr><td>IRRF</td><td></td><td class="valor">${formatBRL(c.irrf)}</td></tr>
+          </tbody>
+        </table>
+        <div class="holerite-total">
+          <div class="item"><div class="lbl">Total bruto</div><div class="val">${formatBRL(c.bruto)}</div></div>
+          <div class="item"><div class="lbl">Total de descontos</div><div class="val">${formatBRL(c.inss+c.irrf)}</div></div>
+          <div class="item"><div class="lbl">Valor líquido a receber</div><div class="val">${formatBRL(c.liquido)}</div></div>
+        </div>
+        <p style="margin-top:28px;font-size:0.85rem">Recebi de ${st.empresa||'Empresa'} a importância líquida de <b>${formatBRL(c.liquido)}</b>, referente às férias do período acima.</p>
+        <div style="margin-top:50px;display:flex;gap:40px">
+          <div style="flex:1;border-top:1px solid #000;text-align:center;padding-top:4px;font-size:0.8rem">${f.nome}</div>
+          <div style="flex:1;border-top:1px solid #000;text-align:center;padding-top:4px;font-size:0.8rem">Data: ____/____/______</div>
+        </div>
+      </div>
+    </div>`;
+}
+function lerValorBRL(v){
+  const t = String(v||'').trim().replace(/\./g,'').replace(',','.');
+  if(t==='') return 0;
+  const n = Number(t);
+  return (isNaN(n) || n<0) ? null : Math.round(n*100)/100;
+}
+async function salvarDescontosFerias(id){
+  const inss = lerValorBRL(document.getElementById('feriasInss').value);
+  const irrf = lerValorBRL(document.getElementById('feriasIrrf').value);
+  if(inss===null || irrf===null){ alert('Informe valores válidos (ex.: 120,50).'); return; }
+  const { error } = await sb.from('absences').update({inss, irrf}).eq('id', id);
+  if(error){ alert('Erro ao salvar: '+error.message); return; }
+  const a = dbGet('absences').find(x=>x.id===id); a.inss = inss; a.irrf = irrf;
+  const f = dbGet('employees').find(e=>e.id===a.employeeId);
+  logAudit(`Descontos do recibo de férias de ${f?f.nome:a.employeeId} (${formatDataBR(a.inicio)} a ${formatDataBR(a.fim)}): INSS ${formatBRL(inss)}, IRRF ${formatBRL(irrf)}`);
+  abrirReciboFerias(id);
 }
 async function excluirAusencia(id){
   const a = dbGet('absences').find(x=>x.id===id); if(!a) return;
