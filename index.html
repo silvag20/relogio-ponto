@@ -937,6 +937,7 @@ function renderEspelho(){
       ${podeEditar?`<td style="white-space:nowrap">
         <button class="icon-btn" onclick="abrirModalEdicaoPonto('${func.id}','${dataISO}')">✏️ Editar</button>
         ${temRegistro?`<button class="icon-btn" style="color:var(--vermelho)" onclick="abrirModalExcluirPonto('${func.id}','${dataISO}')">🗑️ Excluir</button>`:''}
+        ${(aus && !temRegistro)?`<button class="icon-btn" style="color:var(--vermelho)" onclick="excluirAusenciaDia('${func.id}','${dataISO}')">🗑️ Excluir ${aus.tipo.startsWith('Folga')?'folga':aus.tipo.toLowerCase()}</button>`:''}
       </td>`:''}
     </tr>`;
   }
@@ -1846,6 +1847,45 @@ async function salvarDescontosFerias(id){
   const f = dbGet('employees').find(e=>e.id===a.employeeId);
   logAudit(`Descontos do recibo de férias de ${f?f.nome:a.employeeId} (${formatDataBR(a.inicio)} a ${formatDataBR(a.fim)}): INSS ${formatBRL(inss)}, IRRF ${formatBRL(irrf)}`);
   abrirReciboFerias(id);
+}
+function somarDiasISO(iso, n){
+  const d = new Date(iso+'T12:00:00'); d.setDate(d.getDate()+n);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+// Remove só o dia escolhido de uma ausência/folga (divide o período se o dia estiver no meio)
+async function excluirAusenciaDia(employeeId, dataISO){
+  const a = ausenciaDoDia(employeeId, dataISO); if(!a) return;
+  const f = dbGet('employees').find(e=>e.id===employeeId);
+  const unico = a.inicio===a.fim;
+  const msg = unico
+    ? `Excluir "${a.tipo}" de ${f?f.nome:''} em ${formatDataBR(dataISO)}?`
+    : `"${a.tipo}" de ${f?f.nome:''} vai de ${formatDataBR(a.inicio)} a ${formatDataBR(a.fim)}.\n\nExcluir somente o dia ${formatDataBR(dataISO)}? (Para excluir o período inteiro, use Férias e Ausências.)`;
+  if(!confirm(msg)) return;
+  let erro = null;
+  if(unico){
+    ({error:erro} = await sb.from('absences').delete().eq('id', a.id));
+    if(!erro) state.absences = state.absences.filter(x=>x.id!==a.id);
+  } else if(dataISO===a.inicio){
+    const novo = somarDiasISO(dataISO,1);
+    ({error:erro} = await sb.from('absences').update({data_inicio:novo}).eq('id', a.id));
+    if(!erro) a.inicio = novo;
+  } else if(dataISO===a.fim){
+    const novo = somarDiasISO(dataISO,-1);
+    ({error:erro} = await sb.from('absences').update({data_fim:novo}).eq('id', a.id));
+    if(!erro) a.fim = novo;
+  } else {
+    const fimOriginal = a.fim, ate = somarDiasISO(dataISO,-1), de = somarDiasISO(dataISO,1);
+    ({error:erro} = await sb.from('absences').update({data_fim:ate}).eq('id', a.id));
+    if(!erro){
+      a.fim = ate;
+      const r = await sb.from('absences').insert({employee_id:employeeId, tipo:a.tipo, data_inicio:de, data_fim:fimOriginal, observacao:a.obs||null, criado_por:currentUser.nome}).select().single();
+      if(r.error){ erro = r.error; }
+      else state.absences.push({id:r.data.id, employeeId, tipo:a.tipo, inicio:de, fim:fimOriginal, obs:a.obs||'', criadoPor:currentUser.nome, inss:null, irrf:null});
+    }
+  }
+  if(erro){ alert('Erro ao excluir: '+erro.message); return; }
+  logAudit(`${a.tipo} excluída de ${f?f.nome:employeeId} no dia ${formatDataBR(dataISO)}`);
+  renderEspelho();
 }
 async function excluirAusencia(id){
   const a = dbGet('absences').find(x=>x.id===id); if(!a) return;
