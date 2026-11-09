@@ -128,6 +128,8 @@
     .holerite{box-shadow:none;max-width:100%;}
     .no-print{display:none !important;}
   }
+  #avisoOffline{display:none;position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#b45309;color:#fff;padding:8px 14px;font-size:0.85rem;text-align:center}
+  #avisoOffline button{background:#fff;color:#b45309;border:0;border-radius:6px;padding:3px 8px;font-weight:600;cursor:pointer}
 </style>
 </head>
 <body>
@@ -233,6 +235,7 @@ async function carregarTudo(){
     sb.from('profiles').select('*, employees(nome)'),
     sb.from('absences').select('*').order('data_inicio', {ascending:false}),
   ]);
+  if((empRes.error && erroDeRede(empRes.error)) || (recRes.error && erroDeRede(recRes.error))) throw new Error('SEM_CONEXAO');
   state.employees = (empRes.data||[]).map(mapEmployeeFromDB);
   state.records = (recRes.data||[]).map(mapRecordFromDB);
   state.holidays = (holRes.data||[]).map(h=>({data:h.data, nome:h.nome, _id:h.id}));
@@ -248,7 +251,105 @@ async function carregarTudo(){
     (Array.isArray(er.data)?er.data:[]).forEach(x=>{ emailsPorId[x.id] = x.email; });
   }catch(e){}
   state.usuarios = (usrRes.data||[]).map(u=>({id:u.id, nome:u.nome, email:emailsPorId[u.id]||'', role:u.role, employeeId:u.employee_id, employeeNome:u.employees?u.employees.nome:null}));
+  salvarCopiaOffline();
 }
+
+/* ======================================================================
+   MODO SEM INTERNET: cópia local dos dados + fila de marcações
+   ====================================================================== */
+const LS_COPIA = 'rp_copia_offline', LS_FILA = 'rp_fila_ponto', LS_REJ = 'rp_fila_rejeitadas';
+let modoOffline = false;
+function lsLer(k, padrao){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : padrao; }catch(e){ return padrao; } }
+function lsGravar(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
+function salvarCopiaOffline(){
+  if(!currentUser) return;
+  // só o necessário para bater ponto (sem CPF e sem salário)
+  const emps = state.employees.map(e=>({...e, cpf:'', salario:0}));
+  const desde = new Date(); desde.setDate(desde.getDate()-45);
+  const corte = `${desde.getFullYear()}-${String(desde.getMonth()+1).padStart(2,'0')}-${String(desde.getDate()).padStart(2,'0')}`;
+  lsGravar(LS_COPIA, { usuario: currentUser, salvoEm: Date.now(), state: {
+    employees: emps, records: state.records.filter(r=>r.date>=corte && !String(r.id).startsWith('offline-')),
+    holidays: state.holidays, settings: state.settings, absences: state.absences, pins: state.pins, closures:[], corrections:[], audit:[], usuarios:[]
+  }});
+}
+function usarCopiaOffline(){
+  const c = lsLer(LS_COPIA, null);
+  if(!c || !c.usuario) return false;
+  currentUser = c.usuario;
+  Object.assign(state, c.state);
+  aplicarFilaNoEstado();
+  modoOffline = true;
+  return true;
+}
+function erroDeRede(err){
+  const m = String((err && (err.message||err)) || '');
+  return !navigator.onLine || /failed to fetch|networkerror|load failed|network request failed|SEM_CONEXAO|fetch/i.test(m);
+}
+function filaPonto(){ return lsLer(LS_FILA, []); }
+// mostra na tela as marcações guardadas que ainda não foram enviadas
+function aplicarFilaNoEstado(){
+  state.records = state.records.filter(r=>!String(r.id).startsWith('offline-'));
+  filaPonto().forEach(q=>state.records.push({id:'offline-'+q.qid, employeeId:q.employeeId, date:q.data, tipo:q.tipo, hora:q.hora, registradoPor:q.registradoPor}));
+}
+function atualizarAvisoOffline(){
+  let el = document.getElementById('avisoOffline');
+  if(!el){ el = document.createElement('div'); el.id='avisoOffline'; document.body.appendChild(el); }
+  const n = filaPonto().length, rej = lsLer(LS_REJ, []).length;
+  const offline = !navigator.onLine || modoOffline;
+  if(!offline && n===0 && rej===0){ el.style.display='none'; return; }
+  let txt = '';
+  if(offline) txt += '📴 Sem internet — as marcações ficam guardadas neste aparelho e são enviadas quando a conexão voltar. ';
+  if(n>0) txt += `⏳ ${n} marcação(ões) aguardando envio. `;
+  if(rej>0) txt += `<button onclick="mostrarRejeitadas()" style="margin-left:6px">⚠️ ${rej} marcação(ões) recusada(s) — ver</button>`;
+  el.innerHTML = txt; el.style.display='block';
+}
+function mostrarRejeitadas(){
+  const rej = lsLer(LS_REJ, []);
+  const nomeDe = id => (dbGet('employees').find(e=>e.id===id)||{}).nome || id;
+  document.getElementById('modalBox').innerHTML = `
+    <h2>Marcações recusadas</h2>
+    <p style="color:var(--cinza);font-size:0.9rem">Estas marcações foram feitas sem internet, mas o sistema recusou o envio. Lance-as manualmente pelo Espelho de Ponto, se forem válidas.</p>
+    <table><tbody>${rej.map(q=>`<tr><td>${nomeDe(q.employeeId)}</td><td>${q.tipo}</td><td>${formatDataBR(q.data)} ${q.hora}</td><td>${q.motivo}</td></tr>`).join('')}</tbody></table>
+    <div class="modal-acoes"><button class="btn btn-cinza" onclick="limparRejeitadas()">Limpar lista</button><button class="btn btn-azul" onclick="fecharModal()">Fechar</button></div>`;
+  abrirModal();
+}
+function limparRejeitadas(){ lsGravar(LS_REJ, []); fecharModal(); atualizarAvisoOffline(); }
+let sincronizando = false;
+async function sincronizarFila(){
+  if(sincronizando || !navigator.onLine || !currentUser) return;
+  const fila = filaPonto(); if(fila.length===0){ atualizarAvisoOffline(); return; }
+  sincronizando = true;
+  try{
+    const { data:sess } = await sb.auth.getSession();
+    if(!sess || !sess.session) return;
+    const msgs = { PIN_INVALIDO:'senha incorreta', PIN_BLOQUEADO:'colaborador bloqueado por tentativas', COLABORADOR_INATIVO:'colaborador inativo', SEM_PERMISSAO:'sem permissão', TIPO_INVALIDO:'tipo inválido' };
+    let enviou = false;
+    for(const q of fila){
+      let resp;
+      try{
+        resp = await sb.rpc('registrar_ponto', { p_employee_id:q.employeeId, p_tipo:q.tipo, p_data:q.data, p_hora:q.hora, p_pin:q.pin||null, p_registrado_por:q.registradoPor });
+      }catch(e){ break; }
+      if(resp.error){ if(erroDeRede(resp.error)) break; else continue; }
+      const d = resp.data;
+      if(d && d.erro==='NAO_AUTENTICADO') break;
+      if(d && d.ok){ enviou = true; await logAudit(`Registro de ponto (enviado após ficar sem internet): ${q.tipo} para ${q.nomeFunc||q.employeeId} às ${q.hora} de ${q.data}`); }
+      else if(d && d.erro!=='JA_REGISTRADO'){
+        const rej = lsLer(LS_REJ, []); rej.push({...q, pin:undefined, motivo:(msgs[d.erro]||d.erro||'recusada')}); lsGravar(LS_REJ, rej);
+      }
+      lsGravar(LS_FILA, filaPonto().filter(x=>x.qid!==q.qid));
+    }
+    if(enviou || filaPonto().length===0){
+      try{ await carregarTudo(); }catch(e){}
+      aplicarFilaNoEstado();
+      if(viewAtual==='ponto') renderPonto();
+    }
+  } finally { sincronizando = false; atualizarAvisoOffline(); }
+}
+window.addEventListener('online', ()=>{ modoOffline=false; atualizarAvisoOffline(); sincronizarFila(); });
+window.addEventListener('offline', atualizarAvisoOffline);
+setInterval(()=>{ if(filaPonto().length>0) sincronizarFila(); atualizarAvisoOffline(); }, 30000);
+if('serviceWorker' in navigator){ window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
+
 
 async function logAudit(acao){
   const usuario_nome = currentUser?currentUser.nome:'Sistema';
@@ -342,7 +443,7 @@ async function fazerLogin(){
   const senha = document.getElementById('loginPass').value;
   document.getElementById('loginErro').textContent = '';
   const { data, error } = await sb.auth.signInWithPassword({ email, password: senha });
-  if(error){ document.getElementById('loginErro').textContent = 'E-mail ou senha inválidos.'; return; }
+  if(error){ document.getElementById('loginErro').textContent = (!navigator.onLine || erroDeRede(error)) ? 'Sem internet. O primeiro acesso do dia precisa de conexão.' : 'E-mail ou senha inválidos.'; return; }
   const perfil = await carregarPerfil(data.user.id);
   if(!perfil){
     document.getElementById('loginErro').textContent = 'Login ok, mas não há perfil cadastrado para este usuário na tabela "profiles".';
@@ -363,13 +464,25 @@ async function fazerLogout(){
   document.getElementById('loginPass').value='';
 }
 async function verificarSessao(){
-  const { data } = await sb.auth.getSession();
-  if(!data.session) return;
-  const perfil = await carregarPerfil(data.session.user.id);
-  if(!perfil) return;
-  currentUser = perfil;
-  await carregarTudo();
-  entrarNoApp();
+  try{
+    const { data } = await sb.auth.getSession();
+    if(!data.session){
+      if(!navigator.onLine && usarCopiaOffline()){ entrarNoApp(); atualizarAvisoOffline(); }
+      return;
+    }
+    const perfil = await carregarPerfil(data.session.user.id);
+    if(!perfil){
+      if(!navigator.onLine && usarCopiaOffline()){ entrarNoApp(); atualizarAvisoOffline(); }
+      return;
+    }
+    currentUser = perfil;
+    await carregarTudo();
+    aplicarFilaNoEstado();
+    entrarNoApp();
+    sincronizarFila();
+  }catch(err){
+    if(usarCopiaOffline()){ entrarNoApp(); atualizarAvisoOffline(); }
+  }
 }
 
 const MENUS = {
@@ -712,11 +825,26 @@ async function confirmarPonto(employeeId, tipo){
   if(!ehProprio && temPin && !pin){ alert('Digite a senha de ponto do colaborador.'); return; }
   const btn = document.getElementById('btnConfirmarPonto'); if(btn) btn.disabled = true;
   const hora = horaAgora();
-  const { data, error } = await sb.rpc('registrar_ponto', {
-    p_employee_id: employeeId, p_tipo: tipo, p_data: hojeISO(), p_hora: hora,
-    p_pin: pin || null, p_registrado_por: currentUser.nome
-  });
+  const guardarOffline = () => {
+    const fila = filaPonto();
+    if(fila.some(q=>q.employeeId===employeeId && q.data===hojeISO() && q.tipo===tipo)){ fecharModal(); alert(`"${tipo}" já foi registrada hoje para ${funcAlvo?funcAlvo.nome:''}.`); return; }
+    const qid = Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+    fila.push({qid, employeeId, nomeFunc:funcAlvo?funcAlvo.nome:'', tipo, data:hojeISO(), hora, pin: pin||null, registradoPor: currentUser.nome, criadoEm:Date.now()});
+    if(!lsGravar(LS_FILA, fila)){ alert('Não foi possível guardar a marcação neste aparelho (sem espaço). Tente novamente.'); return; }
+    state.records.push({id:'offline-'+qid, employeeId, date:hojeISO(), tipo, hora, registradoPor:currentUser.nome});
+    fecharModal(); atualizarAvisoOffline(); renderPonto();
+    alert(`📴 Sem internet. ${tipo} de ${funcAlvo?funcAlvo.nome:''} às ${hora} foi GUARDADA neste aparelho e será enviada automaticamente quando a internet voltar. A senha será conferida nesse momento.`);
+  };
+  if(!navigator.onLine){ if(btn) btn.disabled = false; guardarOffline(); return; }
+  let data, error;
+  try{
+    ({ data, error } = await sb.rpc('registrar_ponto', {
+      p_employee_id: employeeId, p_tipo: tipo, p_data: hojeISO(), p_hora: hora,
+      p_pin: pin || null, p_registrado_por: currentUser.nome
+    }));
+  }catch(e){ error = e; }
   if(btn) btn.disabled = false;
+  if(error && erroDeRede(error)){ guardarOffline(); return; }
   if(error){ alert('Erro ao registrar ponto: '+error.message); return; }
   if(!data || !data.ok){
     const msgs = {
